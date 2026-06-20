@@ -16,6 +16,8 @@ find_package(tf2_ros REQUIRED)
 
 rosidl_generate_interfaces(${PROJECT_NAME}
   "msg/NitrosFrameHandle.msg"
+  "msg/BlockDetection.msg"
+  "msg/RlObservation.msg"
   DEPENDENCIES std_msgs
 )
 
@@ -24,6 +26,12 @@ target_include_directories(articulation_model PUBLIC
   $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
   $<INSTALL_INTERFACE:include>)
 ament_target_dependencies(articulation_model geometry_msgs)
+
+add_library(safety_boundary_evaluator SHARED src/safety_boundary_evaluator.cpp)
+target_include_directories(safety_boundary_evaluator PUBLIC
+  $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+  $<INSTALL_INTERFACE:include>)
+target_link_libraries(safety_boundary_evaluator articulation_model)
 
 add_executable(mock_articulation_bridge src/mock_articulation_bridge.cpp)
 target_include_directories(mock_articulation_bridge PUBLIC
@@ -37,7 +45,7 @@ ament_target_dependencies(
   geometry_msgs
   tf2_ros)
 
-install(TARGETS articulation_model mock_articulation_bridge
+install(TARGETS articulation_model safety_boundary_evaluator mock_articulation_bridge
   ARCHIVE DESTINATION lib
   LIBRARY DESTINATION lib
   RUNTIME DESTINATION lib/${PROJECT_NAME})
@@ -51,6 +59,8 @@ install(DIRECTORY launch
 install(PROGRAMS
   scripts/mock_camera_publisher
   scripts/joint_command_dispatcher
+  scripts/block_vision_tracker
+  scripts/rl_observation_bridge
   DESTINATION lib/${PROJECT_NAME})
 
 ament_python_install_package(spark_verify_nodes
@@ -69,10 +79,17 @@ if(BUILD_TESTING)
     target_link_libraries(test_articulation_model articulation_model)
   endif()
 
+  ament_add_gtest(test_safety_boundaries test/test_safety_boundaries.cpp)
+  if(TARGET test_safety_boundaries)
+    target_include_directories(test_safety_boundaries PUBLIC include)
+    target_link_libraries(test_safety_boundaries safety_boundary_evaluator)
+  endif()
+
   add_launch_test(test/test_phase1_integration.py TIMEOUT 60)
+  add_launch_test(test/test_phase2_integration.py TIMEOUT 60)
 endif()
 
 ament_export_include_directories(include)
-ament_export_libraries(articulation_model)
+ament_export_libraries(articulation_model safety_boundary_evaluator)
 ament_export_dependencies(rosidl_default_runtime)
 ament_package()

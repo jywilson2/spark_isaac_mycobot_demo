@@ -34,12 +34,23 @@ class MockCameraPublisher(Node):
         self.declare_parameter('publish_rate_hz', 10.0)
         self.declare_parameter('image_width', 640)
         self.declare_parameter('image_height', 480)
+        self.declare_parameter('block_center_x', 0.5)
+        self.declare_parameter('block_center_y', 0.5)
+        self.declare_parameter('block_width', 0.125)
+        self.declare_parameter('block_height', 0.167)
 
         rgb_topic = self.get_parameter('rgb_topic').get_parameter_value().string_value
         nitros_topic = self.get_parameter('nitros_topic').get_parameter_value().string_value
         self._frame_id = self.get_parameter('frame_id').get_parameter_value().string_value
         self._width = self.get_parameter('image_width').get_parameter_value().integer_value
         self._height = self.get_parameter('image_height').get_parameter_value().integer_value
+        self._block_center_x = (
+            self.get_parameter('block_center_x').get_parameter_value().double_value)
+        self._block_center_y = (
+            self.get_parameter('block_center_y').get_parameter_value().double_value)
+        self._block_width = self.get_parameter('block_width').get_parameter_value().double_value
+        self._block_height = (
+            self.get_parameter('block_height').get_parameter_value().double_value)
         rate_hz = self.get_parameter('publish_rate_hz').get_parameter_value().double_value
 
         self._rgb_pub = self.create_publisher(Image, rgb_topic, 10)
@@ -62,7 +73,8 @@ class MockCameraPublisher(Node):
         rgb.encoding = 'rgb8'
         rgb.is_bigendian = 0
         rgb.step = row_step
-        rgb.data = [((row + col) % 256) for row in range(self._height) for col in range(row_step)]
+        rgb.data = [40, 40, 40] * (self._width * self._height)
+        self._paint_block(rgb)
         self._rgb_pub.publish(rgb)
 
         nitros = NitrosFrameHandle()
@@ -75,6 +87,24 @@ class MockCameraPublisher(Node):
         nitros.uid = self._uid
         nitros.device_id = 0
         self._nitros_pub.publish(nitros)
+
+    def _paint_block(self, rgb: Image) -> None:
+        half_width = int(self._block_width * self._width / 2.0)
+        half_height = int(self._block_height * self._height / 2.0)
+        center_x = int(self._block_center_x * self._width)
+        center_y = int(self._block_center_y * self._height)
+        min_x = max(center_x - half_width, 0)
+        max_x = min(center_x + half_width, self._width)
+        min_y = max(center_y - half_height, 0)
+        max_y = min(center_y + half_height, self._height)
+
+        for row in range(min_y, max_y):
+            row_offset = row * rgb.step
+            for col in range(min_x, max_x):
+                pixel_offset = row_offset + col * 3
+                rgb.data[pixel_offset] = 230
+                rgb.data[pixel_offset + 1] = 30
+                rgb.data[pixel_offset + 2] = 30
 
 
 def main() -> None:
