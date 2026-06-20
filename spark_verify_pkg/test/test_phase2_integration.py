@@ -35,6 +35,7 @@ CENTROID_TOLERANCE = 0.05
 @pytest.mark.launch_test
 @launch_testing.markers.keep_alive
 def generate_test_description():
+    os.environ['ROS_DOMAIN_ID'] = '42'
     launch_file = os.path.join(
         os.path.dirname(__file__), '..', 'launch', 'phase2_mock_ecosystem.launch.py')
 

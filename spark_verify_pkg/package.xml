@@ -2,8 +2,8 @@
 <?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
 <package format="3">
   <name>spark_verify_pkg</name>
-  <version>0.2.0</version>
-  <description>Phase 1 and Phase 2 verification for the MyCobot Isaac Sim ROS 2 and RL mock ecosystem.</description>
+  <version>0.3.0</version>
+  <description>Phase 1-4 verification for the MyCobot Isaac Sim ROS 2, RL, and edge deployment mock ecosystem.</description>
   <maintainer email="jywilson@ieee.org">jywilson</maintainer>
   <license>Apache-2.0</license>
 

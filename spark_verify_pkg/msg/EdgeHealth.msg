@@ -1,0 +1,8 @@
+std_msgs/Header header
+float64 inference_latency_ms
+float64 max_latency_threshold_ms
+uint32 frames_received
+uint32 frames_dropped
+bool latency_ok
+bool frame_pipeline_ok
+string recommended_lens

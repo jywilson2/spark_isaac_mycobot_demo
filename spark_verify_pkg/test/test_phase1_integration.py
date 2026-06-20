@@ -31,6 +31,7 @@ from tf2_ros import Buffer, TransformListener
 @pytest.mark.launch_test
 @launch_testing.markers.keep_alive
 def generate_test_description():
+    os.environ['ROS_DOMAIN_ID'] = '41'
     launch_file = os.path.join(
         os.path.dirname(__file__), '..', 'launch', 'phase1_mock_ecosystem.launch.py')
 
