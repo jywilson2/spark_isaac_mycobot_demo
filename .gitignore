@@ -4,3 +4,6 @@ __pycache__/
 build/
 install/
 log/
+
+# Generated robot assets (copied meshes + Isaac-ready URDF)
+assets/robots/

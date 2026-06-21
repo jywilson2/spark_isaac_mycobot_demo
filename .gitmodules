@@ -1,0 +1,4 @@
+[submodule "third_party/mycobot_ros2"]
+	path = third_party/mycobot_ros2
+	url = https://github.com/elephantrobotics/mycobot_ros2.git
+	branch = humble
