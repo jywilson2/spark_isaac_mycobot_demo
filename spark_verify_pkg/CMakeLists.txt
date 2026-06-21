@@ -126,6 +126,8 @@ install(PROGRAMS
   scripts/onnx_inference_node
   scripts/edge_deployment_node
   scripts/mock_usb_camera_hil
+  scripts/live_nitros_camera_bridge
+  scripts/live_mdp_reward_monitor
   DESTINATION lib/${PROJECT_NAME})
 
 # Installs the spark_verify_nodes/ Python module into site-packages so
@@ -183,6 +185,11 @@ if(BUILD_TESTING)
   add_launch_test(test/test_phase2_integration.py TIMEOUT 60)
   add_launch_test(test/test_phase3_integration.py TIMEOUT 60)
   add_launch_test(test/test_phase4_hil_integration.py TIMEOUT 60)
+  add_launch_test(test/test_phase1_live_integration.py TIMEOUT 120)
+  add_launch_test(test/test_phase2_live_integration.py TIMEOUT 120)
+
+  ament_add_pytest_test(test_live_sim_gate test/test_live_sim_gate.py)
+  ament_add_pytest_test(test_safety_boundary_evaluator_py test/test_safety_boundary_evaluator_py.py)
 endif()
 
 # Export headers/libraries so a downstream package could link against the
