@@ -90,6 +90,8 @@ install(PROGRAMS
   scripts/onnx_inference_node
   scripts/edge_deployment_node
   scripts/mock_usb_camera_hil
+  scripts/live_nitros_camera_bridge
+  scripts/live_mdp_reward_monitor
   DESTINATION lib/${PROJECT_NAME})
 
 ament_python_install_package(spark_verify_nodes
@@ -98,6 +100,7 @@ ament_python_install_package(spark_verify_nodes
 
 if(BUILD_TESTING)
   find_package(ament_cmake_gtest REQUIRED)
+  find_package(ament_cmake_pytest REQUIRED)
   find_package(ament_lint_auto REQUIRED)
   find_package(launch_testing_ament_cmake REQUIRED)
   ament_lint_auto_find_test_dependencies()
@@ -124,6 +127,11 @@ if(BUILD_TESTING)
   add_launch_test(test/test_phase2_integration.py TIMEOUT 60)
   add_launch_test(test/test_phase3_integration.py TIMEOUT 60)
   add_launch_test(test/test_phase4_hil_integration.py TIMEOUT 60)
+  add_launch_test(test/test_phase1_live_integration.py TIMEOUT 120)
+  add_launch_test(test/test_phase2_live_integration.py TIMEOUT 120)
+
+  ament_add_pytest_test(test_live_sim_gate test/test_live_sim_gate.py)
+  ament_add_pytest_test(test_safety_boundary_evaluator_py test/test_safety_boundary_evaluator_py.py)
 endif()
 
 ament_export_include_directories(include)

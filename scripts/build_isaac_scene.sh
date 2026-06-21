@@ -31,4 +31,5 @@ export FASTDDS_BUILTIN_TRANSPORTS="${FASTDDS_BUILTIN_TRANSPORTS:-UDPv4}"
 exec "${PYTHON_SH}" \
   "${REPO_ROOT}/isaac_sim/build_mycobot_limo_cobot_scene.py" \
   --repo-root "${REPO_ROOT}" \
+  --with-ros2-bridge \
   "$@"

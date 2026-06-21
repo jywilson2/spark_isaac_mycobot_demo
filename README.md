@@ -6,7 +6,9 @@ Automated pipeline for simulating the Elephant Robotics MyCobot 280 inside NVIDI
 
 | Path | Purpose |
 |------|---------|
-| `spark_verify_pkg/` | ROS 2 verification package with mock ecosystem nodes and automated tests |
+| `spark_verify_pkg/` | ROS 2 verification package with mock and live ecosystem nodes and automated tests |
+| `isaac_sim/` | Isaac Sim scene builder, ROS 2 bridge config, and host-side live sim runner |
+| `scripts/` | Asset fetch, scene build, live sim launch, and live test helpers |
 | `spec.md` | Full project specification and incremental backlog |
 | `commands/` | Agent command playbooks (`initial_project_generation*.md`, `test_live.md`) |
 | `initial_project_generation.md` | Phase 1 generation instructions |
@@ -121,7 +123,51 @@ colcon test --packages-select spark_verify_pkg
 colcon test-result --all
 ```
 
-All tests must report zero failures before proceeding to live Isaac Sim / hardware integration.
+All mock tests must report zero failures before live Isaac Sim verification. Live integration tests auto-skip when Isaac Sim is not playing (or set `SPARK_SKIP_LIVE_SIM_TESTS=1`).
+
+### Live Phase 1 & 2 (Isaac Sim)
+
+Live stacks use Isaac Sim on the host for articulation and camera telemetry. Docker-side nodes consume live topics — **not** mock articulation or mock camera publishers.
+
+**Design (Live Phase 1)**
+
+- `isaac_sim/build_mycobot_limo_cobot_scene.py` + `isaac_sim/ros2_bridge_config.py`: host-side scene with embedded ROS 2 OmniGraph bridge (`/clock`, `/mycobot/joint_commands`, `/mycobot/joint_states`, `/mycobot/camera/rgb`).
+- `isaac_sim/run_mycobot_live_sim.py`: load scene and run live sim with bridge on the host.
+- `live_nitros_camera_bridge` (Python): publishes `/mycobot/camera/nitros/rgb` NITROS frame handles from live RGB frames.
+- `joint_command_dispatcher` with `joint_name_mode:=urdf`: sends URDF joint commands to Isaac Sim.
+- `phase1_live_ecosystem.launch.py`: live Phase 1 Docker-side stack (no mock bridge/camera).
+
+**Design (Live Phase 2)**
+
+- `block_vision_tracker`: detects the red workspace block from **live** camera RGB (not synthetic mock painting).
+- `rl_observation_bridge`: fuses live detections and joint states into `/mycobot/rl/observation`.
+- `IsaacLabMyCobotPickPlaceEnv` (`isaac_lab_mdp_env.py`): Isaac Lab MDP facade wired to live ROS topics.
+- `live_mdp_reward_monitor`: publishes live reward and safety penalty metrics for smoke tests.
+- `phase2_live_ecosystem.launch.py`: Phase 1 live stack plus vision, observation bridge, and MDP monitor.
+
+**Verification**
+
+- `test_phase1_live_integration.py` — live joint command/state, TF, RGB + NITROS (skips without Isaac Sim).
+- `test_phase2_live_integration.py` — live block centroid, RL observation vector, safety/reward penalization (skips without Isaac Sim).
+- `test_live_sim_gate.py`, `test_safety_boundary_evaluator_py.py` — always-run unit tests for live gate and safety logic.
+
+**Run Live Phase 1 manually (Docker, Isaac Sim playing on host)**
+
+```bash
+export ROS_DOMAIN_ID=42
+export FASTDDS_BUILTIN_TRANSPORTS=UDPv4
+source /workspaces/isaac_ros-dev/install/setup.bash
+ros2 launch spark_verify_pkg phase1_live_ecosystem.launch.py
+```
+
+**Run Live Phase 2 manually**
+
+```bash
+export ROS_DOMAIN_ID=42
+export FASTDDS_BUILTIN_TRANSPORTS=UDPv4
+source /workspaces/isaac_ros-dev/install/setup.bash
+ros2 launch spark_verify_pkg phase2_live_ecosystem.launch.py
+```
 
 ## Running Isaac Sim
 
@@ -198,12 +244,50 @@ Output:
 | Scene USD | `assets/scenes/mycobot_280_m5_limo_cobot.usd` |
 | Isaac-ready URDF + meshes | `assets/robots/mycobot_280_m5_limo_cobot/` |
 
-Open the USD in Isaac Sim (**File → Open**), then enable the **ROS 2 bridge** for articulation and camera topics:
+The scene builder embeds the ROS 2 OmniGraph bridge (`--with-ros2-bridge`) for live topics.
 
-1. **Window → Examples → Robotics Examples**
-2. **ROS2 → Isaac ROS →** configure bridge action graph for `/mycobot/joint_commands`, `/mycobot/joint_states`, and `/mycobot/camera/rgb` (live Phase 1 wiring)
-3. Confirm the **WorkspaceCamera** prim faces the pick-and-place table
-4. Press **Play** on the left toolbar (triangle icon). Simulation must be playing for topics to publish
+### Step 3 — Start live Isaac Sim with ROS 2 bridge (host)
+
+In a **native host terminal**:
+
+```bash
+export ROS_DOMAIN_ID=42
+export FASTDDS_BUILTIN_TRANSPORTS=UDPv4
+export ISAACSIM_PATH=/path/to/isaac-sim
+
+cd /path/to/spark_isaac_mycobot_demo
+./scripts/run_live_sim.sh
+```
+
+This rebuilds/opens the scene, enables the bridge, and presses **Play**. Expected host topics:
+
+| Topic | Message type | Role |
+|-------|--------------|------|
+| `/clock` | `rosgraph_msgs/msg/Clock` | Simulation time |
+| `/mycobot/joint_commands` | `sensor_msgs/msg/JointState` | Commands into Isaac Sim articulation |
+| `/mycobot/joint_states` | `sensor_msgs/msg/JointState` | Live articulation feedback |
+| `/mycobot/camera/rgb` | `sensor_msgs/msg/Image` | Workspace camera |
+
+Keep the live sim running for Docker-side verification.
+
+### Step 4 — Launch Docker-side live stacks
+
+**Live Phase 1 (joint + NITROS adapter):**
+
+```bash
+export ROS_DOMAIN_ID=42
+export FASTDDS_BUILTIN_TRANSPORTS=UDPv4
+source /workspaces/isaac_ros-dev/install/setup.bash
+ros2 launch spark_verify_pkg phase1_live_ecosystem.launch.py
+```
+
+**Live Phase 2 (vision + RL observation + MDP monitor):**
+
+```bash
+ros2 launch spark_verify_pkg phase2_live_ecosystem.launch.py
+```
+
+Do **not** use `phase1_mock_ecosystem.launch.py` or `phase2_mock_ecosystem.launch.py` for live acceptance.
 
 **Bridge sanity check (Cursor terminal):**
 
@@ -217,18 +301,21 @@ Expect a non-zero rate (often ~25 Hz). Press `Ctrl+C` to stop.
 
 If `ros2 topic list` shows topics but `hz` hangs, set `FASTDDS_BUILTIN_TRANSPORTS=UDPv4` on **both** host and Docker and restart Isaac Sim. See [Troubleshooting](#isaac-sim-troubleshooting).
 
-### Step 3 — Expected live topics (Phase 1 & 2 targets)
+### Step 5 — Expected live topics (Phase 1 & 2)
 
-These are the **live** endpoints to implement and verify (mock topics in parentheses are **not** substitutes):
+These are the **live** endpoints verified by live integration tests (mock topics are **not** substitutes):
 
 | Topic | Message type | Phase | Role |
 |-------|--------------|-------|------|
 | `/clock` | `rosgraph_msgs/msg/Clock` | 1, 2 | Simulation time (`use_sim_time:=true`) |
 | `/mycobot/joint_commands` | `sensor_msgs/msg/JointState` | 1 | Commands into Isaac Sim articulation |
 | `/mycobot/joint_states` | `sensor_msgs/msg/JointState` | 1, 2 | Live articulation feedback |
-| `/mycobot/camera/rgb` | NITROS / `sensor_msgs/msg/Image` | 1, 2 | Workspace camera (NITROS zero-copy) |
+| `/mycobot/camera/rgb` | `sensor_msgs/msg/Image` | 1, 2 | Workspace camera from Isaac Sim |
+| `/mycobot/camera/nitros/rgb` | project `NitrosFrameHandle` | 1 | NITROS zero-copy descriptors (Docker adapter) |
 | `/mycobot/vision/block_detection` | project `BlockDetection` | 2 | Live block centroid / bbox |
 | `/mycobot/rl/observation` | project `RlObservation` | 2 | RL observation vector from live sim |
+| `/mycobot/rl/live_reward` | `std_msgs/msg/Float32` | 2 | Live MDP reward smoke metric |
+| `/mycobot/rl/live_safety_penalty` | `std_msgs/msg/Float32` | 2 | Live safety penalty smoke metric |
 | `/tf` | `tf2_msgs/msg/TFMessage` | 1 | Articulation transforms |
 
 Verify publishers before live tests:
@@ -242,7 +329,33 @@ ros2 topic list | grep mycobot
 
 You need **Publisher count: 1** (or more) on `/clock` and live sim topics while **Play** is active.
 
-### Step 4 — Run live verification (agent-driven)
+### Step 6 — Run live integration tests
+
+With Isaac Sim playing (`./scripts/run_live_sim.sh` on host):
+
+```bash
+export ROS_DOMAIN_ID=42
+export FASTDDS_BUILTIN_TRANSPORTS=UDPv4
+cd /path/to/spark_isaac_mycobot_demo
+./scripts/run_live_tests.sh
+```
+
+Or from the workspace manually:
+
+```bash
+source /opt/ros/jazzy/setup.bash
+cd ${ISAAC_ROS_WS:-/workspaces/isaac_ros-dev}
+colcon build --packages-select spark_verify_pkg
+source install/setup.bash
+export ROS_DOMAIN_ID=42
+export FASTDDS_BUILTIN_TRANSPORTS=UDPv4
+colcon test --packages-select spark_verify_pkg --event-handlers console_direct+
+colcon test-result --all
+```
+
+Live tests (`test_phase1_live_integration.py`, `test_phase2_live_integration.py`) **auto-skip** when `/clock` is unavailable. Force skip in CI/mock runs with `SPARK_SKIP_LIVE_SIM_TESTS=1`.
+
+### Step 7 — Agent-driven live verification playbook
 
 Use the live testing playbook:
 
@@ -258,7 +371,7 @@ ros2 launch spark_verify_pkg phase1_mock_ecosystem.launch.py
 ros2 launch spark_verify_pkg phase2_mock_ecosystem.launch.py
 ```
 
-### Step 5 — Isaac Lab (Live Phase 2 only)
+### Step 8 — Isaac Lab (Live Phase 2 training)
 
 Live Phase 2 RL work additionally requires **Isaac Lab** with the MDP environment using **live** sim camera observations (not mock `mock_camera_publisher` or synthetic block painting). Start Isaac Sim and load the MyCobot scene first; then launch Isaac Lab training or live MDP smoke tests against the running sim.
 
@@ -267,10 +380,13 @@ Live Phase 2 RL work additionally requires **Isaac Lab** with the MDP environmen
 | Step | Where | Action |
 |------|-------|--------|
 | 1 | Host | Export `ROS_DOMAIN_ID=42` and `FASTDDS_BUILTIN_TRANSPORTS=UDPv4` |
-| 2 | Host | Launch `${ISAACSIM_PATH}/isaac-sim.sh` |
-| 3 | Isaac Sim GUI | Load MyCobot scene + ROS 2 bridge → **Play** |
-| 4 | Cursor | `ros2 topic hz /clock` → expect non-zero rate |
-| 5 | Cursor | Run live tests / agent playbook `@commands/test_live.md` |
+| 2 | Container | `./scripts/fetch_mycobot_assets.sh` |
+| 3 | Host | `./scripts/build_isaac_scene.sh` or `./scripts/run_live_sim.sh` |
+| 4 | Host | Keep live sim playing (bridge publishing `/clock`) |
+| 5 | Cursor | `ros2 topic hz /clock` → expect non-zero rate |
+| 6 | Cursor | `ros2 launch spark_verify_pkg phase1_live_ecosystem.launch.py` |
+| 7 | Cursor | `ros2 launch spark_verify_pkg phase2_live_ecosystem.launch.py` |
+| 8 | Cursor | `./scripts/run_live_tests.sh` or `@commands/test_live.md` |
 
 ### Isaac Sim troubleshooting
 
@@ -302,21 +418,23 @@ export ROS_DOMAIN_ID=42
 ros2 node list
 ```
 
-## Asset ingest & scene builder (Phase 1 foundation)
+## Asset ingest & live integration status
 
 | Item | Status |
 |------|--------|
 | `mycobot_ros2` submodule (`third_party/mycobot_ros2`, `humble`) | Ready — Limo Cobot arm = `mycobot_280_m5.urdf` |
-| Isaac Sim scene builder (`isaac_sim/build_mycobot_limo_cobot_scene.py`) | Ready — run on host via `scripts/build_isaac_scene.sh` |
-| URDF path prep tests (`isaac_sim/test/test_urdf_utils.py`) | Ready — `pytest isaac_sim/test/test_urdf_utils.py` |
-| Live ROS 2 articulation bridge + NITROS camera | Not yet implemented |
+| Isaac Sim scene builder (`isaac_sim/build_mycobot_limo_cobot_scene.py`) | Ready — embeds ROS 2 bridge via `--with-ros2-bridge` |
+| Host live sim runner (`isaac_sim/run_mycobot_live_sim.py`) | Ready — `./scripts/run_live_sim.sh` |
+| Live Phase 1 Docker stack (`phase1_live_ecosystem.launch.py`) | Ready |
+| Live Phase 2 Docker stack (`phase2_live_ecosystem.launch.py`) | Ready |
+| Live integration tests (`test_phase*_live_integration.py`) | Ready — auto-skip without Isaac Sim |
+| Isaac Lab training loop against live sim | Use `IsaacLabMyCobotPickPlaceEnv` — training orchestration is operator-driven |
 
-## Live Integration (Partial)
+## Live Integration (Phase 1–2 ready)
 
-The mock verification phases above validate ROS 2 contracts and safety logic without requiring Isaac Sim or physical hardware. **Live Phase 1 and 2** require Isaac Sim (and Isaac Lab for Phase 2) as described above. Remaining live integration work from `spec.md`:
+Mock verification phases validate ROS 2 contracts without Isaac Sim. **Live Phase 1 and 2** are implemented as described above. Remaining work from `spec.md`:
 
-- **Live Phase 1:** Wire Isaac Sim articulation bridge and real NITROS camera delivery (URDF/scene builder is in place).
-- **Live Phase 2:** Isaac Lab MDP training with real simulated vision and policy weight export.
+- **Live Phase 2 training:** Run Isaac Lab policy training against the live MDP facade (scene + ROS topics must be playing).
 - **Live Phase 3:** Export real trained ONNX weights and connect to physical MyCobot via `pymycobot` serial.
 - **Live Phase 4:** Deploy to Raspberry Pi + AI Hat with live USB camera and physical MyCobot arm.
 

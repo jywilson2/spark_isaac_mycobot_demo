@@ -29,6 +29,10 @@ from isaac_sim.urdf_utils import (  # noqa: E402
     default_upstream_urdf,
     write_isaac_ready_urdf,
 )
+from isaac_sim.ros2_bridge_config import (  # noqa: E402
+    ROBOT_PRIM_PATH,
+    configure_live_ros2_bridge,
+)
 
 DEFAULT_SCENE_USD = (
     REPO_ROOT / "assets" / "scenes" / "mycobot_280_m5_limo_cobot.usd"
@@ -82,6 +86,11 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="Do not press Play after the scene is built",
     )
+    parser.add_argument(
+        "--with-ros2-bridge",
+        action="store_true",
+        help="Embed live ROS 2 OmniGraph bridge in the saved USD",
+    )
     return parser.parse_args()
 
 
@@ -117,7 +126,7 @@ def build_scene(args: argparse.Namespace) -> Path:
     import omni.timeline  # noqa: WPS433
     import omni.usd  # noqa: WPS433
     from isaacsim.core.utils.stage import create_new_stage  # noqa: WPS433
-    from pxr import Gf, Sdf, UsdGeom, UsdLux  # noqa: WPS433
+    from pxr import Gf, Sdf, Usd, UsdGeom, UsdLux, UsdShade  # noqa: WPS433
 
     repo_root = args.repo_root.resolve()
     upstream_urdf = (args.urdf or default_upstream_urdf(repo_root)).resolve()
@@ -195,6 +204,27 @@ def build_scene(args: argparse.Namespace) -> Path:
     if robot_prim.IsValid():
         robot_xform = UsdGeom.Xformable(robot_prim)
         robot_xform.AddTranslateOp().Set(Gf.Vec3d(0.0, 0.0, 0.78))
+        if str(prim_path) != ROBOT_PRIM_PATH:
+            omni.kit.commands.execute(
+                'MovePrim',
+                path_from=str(prim_path),
+                path_to=str(ROBOT_PRIM_PATH),
+            )
+            prim_path = ROBOT_PRIM_PATH
+            robot_prim = stage.GetPrimAtPath(prim_path)
+
+    block_material = UsdShade.Material.Define(stage, world_path.AppendPath("PickBlockMaterial"))
+    shader = UsdShade.Shader.Define(stage, block_material.GetPath().AppendPath("Shader"))
+    shader.CreateIdAttr("UsdPreviewSurface")
+    shader.CreateInput("diffuseColor", Sdf.ValueTypeNames.Color3f).Set(Gf.Vec3f(0.9, 0.1, 0.1))
+    block_material.CreateSurfaceOutput().ConnectToSource(shader.ConnectableAPI(), "surface")
+    UsdShade.MaterialBindingAPI(block).Bind(block_material)
+
+    if args.with_ros2_bridge:
+        configure_live_ros2_bridge(
+            robot_prim_path=str(prim_path),
+            camera_prim_path=str(camera_path),
+        )
 
     save_path = args.save_usd.resolve()
     save_path.parent.mkdir(parents=True, exist_ok=True)
