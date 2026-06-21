@@ -1,3 +1,6 @@
 __pycache__/
 *.pyc
 *.pyo
+
+# Generated robot assets (copied meshes + Isaac-ready URDF)
+assets/robots/
