@@ -90,10 +90,14 @@ class TestPhase4HilEcosystem(unittest.TestCase):
         })
 
     def test_edge_health_reports_latency_and_frame_pipeline(self):
-        received = self._spin_until(lambda: len(self.health_reports) > 0)
-        self.assertTrue(received, 'Timed out waiting for edge health reports')
+        # The first health tick can fire before the first camera stats message
+        # arrives, so wait for a report that has observed camera traffic.
+        received = self._spin_until(
+            lambda: any(report.frames_received > 0 for report in self.health_reports))
+        self.assertTrue(received, 'Timed out waiting for edge health reports with frames')
 
-        health = self.health_reports[-1]
+        health = next(
+            report for report in reversed(self.health_reports) if report.frames_received > 0)
         self.assertLessEqual(health.inference_latency_ms, health.max_latency_threshold_ms)
         self.assertTrue(health.latency_ok)
         self.assertTrue(health.frame_pipeline_ok)

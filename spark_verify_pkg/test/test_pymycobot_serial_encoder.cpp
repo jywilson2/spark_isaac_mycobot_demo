@@ -43,10 +43,61 @@ TEST(PymycobotSerialEncoderTest, RoundTripPreservesJointAngles)
   }
 }
 
+TEST(PymycobotSerialEncoderTest, RoundTripPreservesNegativeAndExtremeAngles)
+{
+  const std::array<double, spark_verify_pkg::kMyCobotDof> expected = {
+    -2.879793, 2.879793, -1.570796, 1.570796, -0.001, 0.0};
+  const auto packet = spark_verify_pkg::encode_send_angles_packet(expected);
+
+  std::array<double, spark_verify_pkg::kMyCobotDof> decoded{};
+  ASSERT_TRUE(spark_verify_pkg::decode_send_angles_packet(packet, decoded));
+
+  for (std::size_t idx = 0; idx < spark_verify_pkg::kMyCobotDof; ++idx) {
+    EXPECT_NEAR(decoded[idx], expected[idx], 0.02);
+  }
+}
+
+TEST(PymycobotSerialEncoderTest, ChecksumMatchesByteSumOfBody)
+{
+  const auto packet = spark_verify_pkg::encode_send_angles_packet(
+    {0.4, -0.2, 0.6, -0.3, 0.5, -0.1});
+
+  std::uint8_t expected_checksum = 0U;
+  for (std::size_t idx = 2; idx < packet.size() - 1U; ++idx) {
+    expected_checksum += packet[idx];
+  }
+  EXPECT_EQ(packet.back(), expected_checksum);
+}
+
 TEST(PymycobotSerialEncoderTest, RejectsInvalidChecksum)
 {
   auto packet = spark_verify_pkg::encode_send_angles_packet({0.1, 0.2, 0.3, 0.4, 0.5, 0.6});
   packet.back() ^= 0xFF;
+
+  std::array<double, spark_verify_pkg::kMyCobotDof> decoded{};
+  EXPECT_FALSE(spark_verify_pkg::decode_send_angles_packet(packet, decoded));
+}
+
+TEST(PymycobotSerialEncoderTest, RejectsCorruptedHeaderOrCommand)
+{
+  const auto valid = spark_verify_pkg::encode_send_angles_packet(
+    {0.1, 0.2, 0.3, 0.4, 0.5, 0.6});
+  std::array<double, spark_verify_pkg::kMyCobotDof> decoded{};
+
+  auto bad_header = valid;
+  bad_header[0] = 0x00;
+  EXPECT_FALSE(spark_verify_pkg::decode_send_angles_packet(bad_header, decoded));
+
+  auto bad_command = valid;
+  bad_command[3] = 0x11;
+  EXPECT_FALSE(spark_verify_pkg::decode_send_angles_packet(bad_command, decoded));
+}
+
+TEST(PymycobotSerialEncoderTest, RejectsTruncatedPacket)
+{
+  auto packet = spark_verify_pkg::encode_send_angles_packet(
+    {0.1, 0.2, 0.3, 0.4, 0.5, 0.6});
+  packet.pop_back();
 
   std::array<double, spark_verify_pkg::kMyCobotDof> decoded{};
   EXPECT_FALSE(spark_verify_pkg::decode_send_angles_packet(packet, decoded));

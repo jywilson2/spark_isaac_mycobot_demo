@@ -76,7 +76,8 @@ Phase 3 validates the ONNX inference → pymycobot serial command pipeline befor
 
 **Verification**
 
-- `test_pymycobot_serial_encoder.cpp` — C++ gtests for deterministic serial encode/decode round-trips.
+- `test_pymycobot_serial_encoder.cpp` — C++ gtests for deterministic serial encode/decode round-trips, negative/extreme angle preservation, checksum verification, and rejection of corrupted or truncated packets.
+- `test_mock_onnx_policy.py` — pytest unit suite covering inference determinism, joint-bias math, centroid steering deltas, zero-padding of truncated observations, and short-observation rejection.
 - `test_phase3_integration.py` — `launch_testing` tests passing mock observations through inference to serial output, and confirming out-of-bound joint angles are rejected before transmission.
 
 **Run Phase 3 manually**
@@ -92,13 +93,14 @@ Phase 4 validates the Raspberry Pi + AI Hat edge deployment path with camera opt
 
 **Design**
 
-- `camera_lens_advisor.py` (Python): computes recommended USB camera focal length from workspace geometry (working distance, block size, sensor width).
+- `camera_lens_advisor.py` (Python): computes the recommended USB camera focal length from workspace geometry. The lens is selected so the horizontal field of view covers the full manipulator workspace span (2 × 280 mm MyCobot reach, plus margin) at the working distance, while validating that the block still subtends enough image pixels for stable vision tracking; unsatisfiable constraint sets are rejected with a `ValueError`.
 - `mock_usb_camera_hil` (Python): simulates USB camera frame publishing and frame-drop statistics.
 - `edge_deployment_node` (Python): mock RPi + AI Hat node with inference latency monitoring, frame pipeline health, and bare-metal safety overrides rejecting out-of-bound joint angles.
 - `phase4_hil_ecosystem.launch.py`: includes the Phase 3 stack plus USB camera HIL and edge deployment nodes.
 
 **Verification**
 
+- `test_camera_lens_advisor.py` — pytest unit suite verifying the focal-length math against the workspace-coverage model, lens category bucketing across workspace spans, block pixel-extent computation, and `ValueError` rejection of non-physical or unresolvable constraint sets.
 - `test_phase4_hil_integration.py` — `launch_testing` HIL tests verifying AI Hat inference latency stays below threshold, USB camera frames process without drops, camera lens recommendation is computed, and out-of-bound joint inferences are rejected before serial transmission.
 
 **Run Phase 4 manually**
@@ -121,6 +123,13 @@ colcon test-result --all
 ```
 
 All tests must report zero failures before proceeding to live Isaac Sim / hardware integration.
+
+If the default `c++` compiler on the build host is Clang without a matching GCC
+runtime (some container images), force the GCC toolchain:
+
+```bash
+CC=gcc CXX=g++ colcon build --packages-select spark_verify_pkg
+```
 
 ## Live Integration (Not Yet Implemented)
 

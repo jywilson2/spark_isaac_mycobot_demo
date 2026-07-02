@@ -39,6 +39,9 @@ class MockUsbCameraHilNode(Node):
 
         self._frames_received = 0
         self._frames_dropped = 0
+        # Precompute the constant frame payload once; rebuilding a ~900k
+        # element list per tick at 15 Hz would skew HIL latency measurements.
+        self._frame_data = bytes([80, 80, 80] * (self._width * self._height))
         self._frame_pub = self.create_publisher(Image, frame_topic, 10)
         self._stats_pub = self.create_publisher(UInt32, stats_topic, 10)
         self._timer = self.create_timer(1.0 / max(rate_hz, 1.0), self._publish_frame)
@@ -55,7 +58,7 @@ class MockUsbCameraHilNode(Node):
         frame.encoding = 'rgb8'
         frame.is_bigendian = 0
         frame.step = self._width * 3
-        frame.data = [80, 80, 80] * (self._width * self._height)
+        frame.data = self._frame_data
         self._frame_pub.publish(frame)
 
         stats = UInt32()

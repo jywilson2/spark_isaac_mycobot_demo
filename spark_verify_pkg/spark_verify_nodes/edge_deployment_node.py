@@ -50,6 +50,7 @@ class EdgeDeploymentNode(Node):
         self._latest_latency_ms = 0.0
         self._frames_received = 0
         self._frames_dropped = 0
+        self._stats_baselined = False
         self._last_serial: SerialCommand | None = None
 
         self._serial_pub = self.create_publisher(SerialCommand, serial_topic, 10)
@@ -59,9 +60,14 @@ class EdgeDeploymentNode(Node):
         self.create_timer(0.5, self._publish_health)
 
     def _on_frame_stats(self, stats: UInt32) -> None:
-        if stats.data < self._frames_received:
-            self._frames_dropped += self._frames_received - stats.data
+        # The camera publishes a cumulative frame counter; after the baseline
+        # sample, any jump larger than one frame means frames were dropped
+        # before this node could process them. A counter that moves backwards
+        # indicates a camera restart, which re-baselines without penalty.
+        if self._stats_baselined and stats.data > self._frames_received + 1:
+            self._frames_dropped += stats.data - self._frames_received - 1
         self._frames_received = stats.data
+        self._stats_baselined = True
 
     def _on_inference(self, inference: PolicyInference) -> None:
         self._latest_latency_ms = inference.inference_latency_ms

@@ -41,20 +41,21 @@ class JointCommandDispatcher(Node):
 
         self._publisher = self.create_publisher(JointState, topic, 10)
         self._targets = targets
-        self._timer = self.create_timer(max(delay, 0.1), self._dispatch_once)
-        self._dispatched = False
+        self._timer = self.create_timer(max(delay, 0.1), self._dispatch)
+        self._logged = False
 
-    def _dispatch_once(self) -> None:
-        if self._dispatched:
-            return
-
+    def _dispatch(self) -> None:
+        # Re-publish the same deterministic command on every tick: a single
+        # shot can be lost if DDS discovery has not completed when the timer
+        # first fires, which would stall the entire downstream pipeline.
         msg = JointState()
         msg.header.stamp = self.get_clock().now().to_msg()
         msg.name = list(DEFAULT_JOINT_NAMES)
         msg.position = self._normalize_positions(self._targets)
         self._publisher.publish(msg)
-        self._dispatched = True
-        self.get_logger().info(f'Dispatched joint command targets: {msg.position}')
+        if not self._logged:
+            self._logged = True
+            self.get_logger().info(f'Dispatching joint command targets: {msg.position}')
 
     @staticmethod
     def _normalize_positions(targets: List[float]) -> List[float]:

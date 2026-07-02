@@ -98,6 +98,7 @@ ament_python_install_package(spark_verify_nodes
 
 if(BUILD_TESTING)
   find_package(ament_cmake_gtest REQUIRED)
+  find_package(ament_cmake_pytest REQUIRED)
   find_package(ament_lint_auto REQUIRED)
   find_package(launch_testing_ament_cmake REQUIRED)
   ament_lint_auto_find_test_dependencies()
@@ -119,6 +120,13 @@ if(BUILD_TESTING)
     target_include_directories(test_pymycobot_serial_encoder PUBLIC include)
     target_link_libraries(test_pymycobot_serial_encoder pymycobot_serial_encoder)
   endif()
+
+  ament_add_pytest_test(test_camera_lens_advisor test/test_camera_lens_advisor.py
+    APPEND_ENV PYTHONPATH=${CMAKE_CURRENT_SOURCE_DIR}
+    TIMEOUT 60)
+  ament_add_pytest_test(test_mock_onnx_policy test/test_mock_onnx_policy.py
+    APPEND_ENV PYTHONPATH=${CMAKE_CURRENT_SOURCE_DIR}
+    TIMEOUT 60)
 
   add_launch_test(test/test_phase1_integration.py TIMEOUT 60)
   add_launch_test(test/test_phase2_integration.py TIMEOUT 60)
