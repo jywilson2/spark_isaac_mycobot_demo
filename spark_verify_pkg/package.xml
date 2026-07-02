@@ -1,5 +1,15 @@
 <?xml version="1.0"?>
 <?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
+<!--
+ROS 2 FUNDAMENTALS - THE PACKAGE MANIFEST: package.xml is the metadata file
+every ROS package must have. Tools read it, not humans: colcon derives the
+build order of the workspace from the dependency graph declared here, and
+rosdep installs the system packages these names map to. Dependency tags:
+  buildtool_depend - needed to RUN the build itself (CMake extensions)
+  depend           - needed at build time AND runtime (most libraries)
+  exec_depend      - runtime only
+  test_depend      - only for `colcon test` (linters, pytest, launch_testing)
+-->
 <package format="3">
   <name>spark_verify_pkg</name>
   <version>0.3.1</version>
@@ -9,22 +19,30 @@
 
   <buildtool_depend>ament_cmake</buildtool_depend>
   <buildtool_depend>ament_cmake_python</buildtool_depend>
+  <!-- rosidl generates C++/Python code from the .msg files at build time -->
   <buildtool_depend>rosidl_default_generators</buildtool_depend>
 
+  <!-- Client libraries: rclcpp for the C++ nodes, rclpy for the Python ones -->
   <depend>rclcpp</depend>
   <depend>rclpy</depend>
+  <!-- Common interface packages (JointState, Image, TransformStamped, ...) -->
   <depend>sensor_msgs</depend>
   <depend>geometry_msgs</depend>
   <depend>std_msgs</depend>
+  <!-- TF2: the coordinate-frame transform system used by the bridge -->
   <depend>tf2</depend>
   <depend>tf2_ros</depend>
   <depend>tf2_geometry_msgs</depend>
+  <!-- Launch system, used by the phase launch files -->
   <depend>launch</depend>
   <depend>launch_ros</depend>
   <depend>ament_index_python</depend>
 
+  <!-- Runtime support for the generated message types -->
   <exec_depend>rosidl_default_runtime</exec_depend>
 
+  <!-- Test-only: gtest/pytest harnesses, launch_testing, and the linters
+       that ament_lint_auto_find_test_dependencies() picks up from here -->
   <test_depend>ament_cmake_gtest</test_depend>
   <test_depend>ament_cmake_pytest</test_depend>
   <test_depend>ament_lint_auto</test_depend>
@@ -34,6 +52,7 @@
   <test_depend>launch_testing_ros</test_depend>
   <test_depend>python3-pytest</test_depend>
 
+  <!-- Marks this package as one that defines message interfaces -->
   <member_of_group>rosidl_interface_packages</member_of_group>
 
   <export>

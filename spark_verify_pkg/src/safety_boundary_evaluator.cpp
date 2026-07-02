@@ -17,8 +17,17 @@
 namespace spark_verify_pkg
 {
 
+// The helpers live in an anonymous namespace: they get internal linkage,
+// so they are private to this translation unit (the C++ analogue of a
+// module-private function in Python).
 namespace
 {
+
+// Each penalty is a "hinge" style cost: zero while inside the limit and
+// growing LINEARLY with the distance past the limit. Linear (rather than
+// binary) penalties matter for RL because they give the policy gradient a
+// direction — being 0.2 rad past a joint limit costs more than being
+// 0.01 rad past it, so learning can push back toward the safe region.
 
 double compute_joint_limit_penalty(
   const SafetyBoundaryConfig & config,
@@ -42,6 +51,7 @@ double compute_velocity_penalty(
   const std::array<double, kMyCobotDof> & joint_velocities)
 {
   double penalty = 0.0;
+  // Velocity limits are symmetric, so only the magnitude matters.
   for (const double velocity : joint_velocities) {
     if (std::abs(velocity) > config.max_joint_velocity_rad_s) {
       penalty += config.velocity_penalty_weight *
@@ -57,6 +67,10 @@ double compute_workspace_penalty(
   double end_effector_y,
   double end_effector_z)
 {
+  // The workspace check is an axis-aligned bounding box (AABB) around the
+  // reachable volume; each axis contributes independently. On the real arm
+  // this is the last line of defense against the gripper striking the
+  // table or the operator's side of the workspace.
   double penalty = 0.0;
   if (end_effector_x < config.workspace_x_min) {
     penalty += config.workspace_penalty_weight *
@@ -102,6 +116,8 @@ SafetyPenaltyResult evaluate_safety_boundaries(
     config, end_effector_x, end_effector_y, end_effector_z);
   result.total_penalty =
     result.joint_limit_penalty + result.velocity_penalty + result.workspace_penalty;
+  // Any positive penalty flips the hard gate. Deployment nodes check this
+  // flag; the RL reward uses the graded total_penalty instead.
   result.boundary_violated = result.total_penalty > 0.0;
   return result;
 }

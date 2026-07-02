@@ -13,6 +13,13 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+# BUILD-SYSTEM NOTE: In an ament_cmake package (unlike pure-Python
+# ament_python packages, which generate console entry points from setup.py),
+# Python executables are these thin wrapper scripts. CMake's
+# install(PROGRAMS ...) copies them into lib/spark_verify_pkg/, which is
+# where `ros2 run` and launch files look for a package's executables. The
+# actual node logic lives in the installed spark_verify_nodes module.
+
 from spark_verify_nodes.mock_camera_publisher import main
 
 if __name__ == '__main__':

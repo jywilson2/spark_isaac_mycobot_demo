@@ -12,6 +12,19 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+# ---------------------------------------------------------------------------
+# Phase 3 adds the sim-to-real command path on top of Phase 2 (which itself
+# includes Phase 1):
+#
+#   /mycobot/rl/observation --> onnx_inference_node --> /mycobot/policy/inference
+#   inference --> pymycobot_driver (safety gate + serial encode)
+#             --> /mycobot/hardware/serial_command
+#
+# Note the mixed-language graph: onnx_inference_node is Python (rclpy),
+# pymycobot_driver is C++ (rclcpp). They interoperate transparently because
+# both speak the same DDS wire format for the shared message types.
+# ---------------------------------------------------------------------------
+
 import os
 
 from ament_index_python.packages import get_package_share_directory
@@ -26,6 +39,7 @@ def generate_launch_description() -> LaunchDescription:
     phase2_launch = os.path.join(package_share, 'launch', 'phase2_mock_ecosystem.launch.py')
 
     return LaunchDescription([
+        # Phases 1 + 2: articulation, camera, dispatcher, vision, RL bridge.
         IncludeLaunchDescription(PythonLaunchDescriptionSource(phase2_launch)),
         Node(
             package='spark_verify_pkg',
@@ -35,6 +49,8 @@ def generate_launch_description() -> LaunchDescription:
             parameters=[{
                 'observation_topic': '/mycobot/rl/observation',
                 'inference_topic': '/mycobot/policy/inference',
+                # Well under the edge node's 50 ms budget so Phase 4 health
+                # checks pass; raise above 50.0 to exercise the latency gate.
                 'simulated_latency_ms': 5.0,
             }],
         ),

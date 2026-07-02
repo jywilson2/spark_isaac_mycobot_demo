@@ -12,14 +12,36 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Deterministic reward terms for the MyCobot pick-and-place MDP."""
+"""
+Deterministic reward terms for the MyCobot pick-and-place MDP.
+
+RL BACKGROUND: In reinforcement learning the reward function is the ONLY
+training signal — the policy network learns whatever behaviour maximizes it.
+A sparse reward ("+1 when the block is lifted") is very hard to learn from,
+because random exploration almost never stumbles onto success. This module
+instead uses REWARD SHAPING: several dense, graded terms that each pay out
+partial credit for progress toward the goal:
+
+    tracking   - keep the block visible near the camera's target point
+    alignment  - move the end effector toward the block
+    grasp      - alignment credit only while the gripper reports a grasp
+    lift       - raise the block toward the target height
+    safety     - SUBTRACTED penalty from the safety boundary evaluator
+
+Every term is a pure function of its inputs (no ROS, no randomness), so the
+Phase 2 tests can assert exact values before any expensive training run.
+"""
 
 from dataclasses import dataclass
 from typing import Iterable, Sequence
 
 
+# frozen=True makes the dataclass immutable (hashable, safe to share between
+# threads/callbacks) — good practice for configuration objects.
 @dataclass(frozen=True)
 class RewardWeights:
+    """Relative importance of each shaped term; lift dominates, then grasp."""
+
     tracking: float = 1.0
     alignment: float = 1.5
     grasp: float = 2.0
@@ -33,6 +55,14 @@ def compute_tracking_reward(
     target_x: float,
     target_y: float,
 ) -> float:
+    """
+    Reward keeping the block centroid near the target image point.
+
+    Inputs are NORMALIZED image coordinates (0..1, from the vision tracker),
+    which makes the reward independent of camera resolution. The reward
+    decays linearly with Euclidean distance and clamps at zero so it never
+    goes negative (penalties are the safety term's job).
+    """
     distance = ((centroid_x - target_x) ** 2 + (centroid_y - target_y) ** 2) ** 0.5
     return max(0.0, 1.0 - distance)
 
@@ -43,15 +73,29 @@ def compute_alignment_reward(
     end_effector_x: float,
     end_effector_y: float,
 ) -> float:
+    """Reward moving the end effector toward the block (same linear decay)."""
     distance = ((centroid_x - end_effector_x) ** 2 + (centroid_y - end_effector_y) ** 2) ** 0.5
     return max(0.0, 1.0 - distance)
 
 
 def compute_grasp_reward(is_grasped: bool, alignment_reward: float) -> float:
+    """
+    Pay the alignment credit again while grasping.
+
+    Coupling grasp to alignment (instead of a flat bonus) prevents a classic
+    reward-hacking failure: closing the gripper far away from the block to
+    farm a constant grasp payout.
+    """
     return alignment_reward if is_grasped else 0.0
 
 
 def compute_lift_reward(block_height: float, target_height: float) -> float:
+    """
+    Reward raising the block, saturating at the target height.
+
+    The max(..., 1e-6) guards against division by zero if a caller ever
+    passes target_height=0.
+    """
     if block_height <= 0.0:
         return 0.0
     return min(1.0, block_height / max(target_height, 1e-6))
@@ -70,6 +114,13 @@ def compute_total_reward(
     target_height: float = 0.15,
     weights: RewardWeights | None = None,
 ) -> float:
+    """
+    Combine the shaped terms into the scalar reward the RL loop consumes.
+
+    Note the sign convention: shaped terms are added, the safety penalty is
+    subtracted with the largest weight (5.0), so no amount of task progress
+    can make violating a safety boundary worthwhile.
+    """
     active_weights = weights or RewardWeights()
     tracking = compute_tracking_reward(centroid_x, centroid_y, target_x, target_y)
     alignment = compute_alignment_reward(centroid_x, centroid_y, end_effector_x, end_effector_y)
@@ -92,6 +143,21 @@ def build_observation_vector(
     end_effector_z: float,
     is_grasped: float,
 ) -> list[float]:
+    """
+    Flatten the MDP state into the fixed observation layout.
+
+    The policy network consumes a flat float vector, so the ORDER here is a
+    binding contract shared by the RL bridge, the mock ONNX policy (which
+    reads joints starting at index 8), and the tests:
+
+        index 0-1 : block centroid (normalized image coords)
+        index 2-5 : block bounding box x_min, y_min, x_max, y_max
+        index 6   : end-effector height (m)
+        index 7   : grasp flag (0.0 / 1.0)
+        index 8-13: six joint positions (rad)
+
+    Changing this layout invalidates any previously-trained policy weights.
+    """
     observation = [
         centroid_x,
         centroid_y,

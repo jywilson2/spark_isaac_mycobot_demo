@@ -12,7 +12,14 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Dispatches joint position commands to the mock articulation bridge."""
+"""
+Dispatches joint position commands to the mock articulation bridge.
+
+TEST-HARNESS PATTERN: Integration tests need a deterministic stimulus. This
+tiny node publishes one known 6-DOF pose so the Phase 1 test can assert that
+exactly those values appear on /mycobot/joint_states and in TF. In a live
+system this role is played by a controller or the RL policy output.
+"""
 
 from typing import List
 
@@ -29,6 +36,8 @@ class JointCommandDispatcher(Node):
         super().__init__('joint_command_dispatcher')
         self.declare_parameter('joint_commands_topic', '/mycobot/joint_commands')
         self.declare_parameter('dispatch_delay_sec', 0.5)
+        # Declaring the default as a float list types this parameter as
+        # DOUBLE_ARRAY; launch files must then pass a list of floats.
         self.declare_parameter(
             'target_positions',
             [0.4, -0.2, 0.6, -0.3, 0.5, -0.1],
@@ -48,17 +57,31 @@ class JointCommandDispatcher(Node):
         # Re-publish the same deterministic command on every tick: a single
         # shot can be lost if DDS discovery has not completed when the timer
         # first fires, which would stall the entire downstream pipeline.
+        #
+        # ROS 2 FUNDAMENTALS — DISCOVERY: DDS peers find each other via a
+        # decentralized handshake that takes tens to hundreds of ms after
+        # startup. A message published before a subscriber has matched is
+        # simply never delivered (with VOLATILE durability, the default).
+        # Periodic re-publish is the simplest robust pattern; the
+        # alternative is a TRANSIENT_LOCAL durability QoS ("latched" topic).
         msg = JointState()
         msg.header.stamp = self.get_clock().now().to_msg()
+        # JointState is parallel arrays: name[i] describes position[i].
+        # Consumers match by name, so both fields must be filled.
         msg.name = list(DEFAULT_JOINT_NAMES)
         msg.position = self._normalize_positions(self._targets)
         self._publisher.publish(msg)
         if not self._logged:
             self._logged = True
+            # get_logger() routes through /rosout so the launch process and
+            # log files capture it alongside every other node's output.
             self.get_logger().info(f'Dispatching joint command targets: {msg.position}')
 
     @staticmethod
     def _normalize_positions(targets: List[float]) -> List[float]:
+        # Tolerate mis-sized parameter arrays: pad with zeros or truncate to
+        # exactly 6 entries so the outgoing message always matches the name
+        # array length (a JointState invariant).
         if len(targets) == len(DEFAULT_JOINT_NAMES):
             return targets
         if len(targets) < len(DEFAULT_JOINT_NAMES):

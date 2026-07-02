@@ -12,17 +12,40 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+# ---------------------------------------------------------------------------
+# ROS 2 FUNDAMENTALS — LAUNCH FILES: ROS 2 systems are compositions of many
+# small processes; a launch file describes the whole composition. Python
+# launch files (this format) must define generate_launch_description()
+# returning a LaunchDescription of "actions" — here, three Node actions.
+# The launch system starts each Node as a separate OS process, passes its
+# parameters, and supervises it (propagating SIGINT on shutdown).
+#
+# Run manually with:
+#   ros2 launch spark_verify_pkg phase1_mock_ecosystem.launch.py
+#
+# Phase 1 graph (topics flow left to right):
+#
+#   joint_command_dispatcher --/mycobot/joint_commands--> mock_articulation_bridge
+#                                                          |--> /mycobot/joint_states
+#                                                          '--> /tf (link transforms)
+#   mock_camera_publisher --> /mycobot/camera/rgb, /mycobot/camera/nitros/rgb
+# ---------------------------------------------------------------------------
+
 from launch import LaunchDescription
 from launch_ros.actions import Node
 
 
 def generate_launch_description() -> LaunchDescription:
     return LaunchDescription([
+        # 'executable' is looked up in <install>/lib/spark_verify_pkg/.
+        # C++ executables land there via install(TARGETS...), Python wrapper
+        # scripts via install(PROGRAMS...). The 'parameters' dict overrides
+        # the defaults each node declared with declare_parameter().
         Node(
             package='spark_verify_pkg',
-            executable='mock_articulation_bridge',
+            executable='mock_articulation_bridge',  # C++ node (rclcpp)
             name='mock_articulation_bridge',
-            output='screen',
+            output='screen',  # forward stdout/logs to the launch console
             parameters=[{
                 'joint_commands_topic': '/mycobot/joint_commands',
                 'joint_states_topic': '/mycobot/joint_states',
@@ -31,7 +54,7 @@ def generate_launch_description() -> LaunchDescription:
         ),
         Node(
             package='spark_verify_pkg',
-            executable='mock_camera_publisher',
+            executable='mock_camera_publisher',  # Python node (rclpy)
             name='mock_camera_publisher',
             output='screen',
             parameters=[{
@@ -49,6 +72,9 @@ def generate_launch_description() -> LaunchDescription:
             parameters=[{
                 'joint_commands_topic': '/mycobot/joint_commands',
                 'dispatch_delay_sec': 0.5,
+                # The deterministic test pose. test_phase1_integration.py
+                # asserts these exact values appear in /mycobot/joint_states,
+                # so the two files must stay in sync.
                 'target_positions': [0.4, -0.2, 0.6, -0.3, 0.5, -0.1],
             }],
         ),

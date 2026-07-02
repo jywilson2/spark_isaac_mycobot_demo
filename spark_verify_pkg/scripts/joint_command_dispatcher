@@ -13,6 +13,10 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+# Executable wrapper installed to lib/spark_verify_pkg/ so `ros2 run
+# spark_verify_pkg joint_command_dispatcher` (and launch files) can find it.
+# See scripts/mock_camera_publisher for the full pattern explanation.
+
 from spark_verify_nodes.joint_command_dispatcher import main
 
 if __name__ == '__main__':

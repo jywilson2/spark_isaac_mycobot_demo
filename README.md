@@ -8,6 +8,7 @@ Automated pipeline for simulating the Elephant Robotics MyCobot 280 inside NVIDI
 |------|---------|
 | `spark_verify_pkg/` | ROS 2 verification package with mock ecosystem nodes and automated tests |
 | `spec.md` | Full project specification and incremental backlog |
+| `REFERENCES.md` | Curated links: MyCobot 280 background, ROS 2 / Isaac / RL / edge-deployment reference material |
 | `initial_project_generation.md` | Phase 1 generation instructions |
 | `initial_project_generation_phase2.md` | Phase 2 generation instructions |
 | `initial_project_generation_phase_remaining.md` | Phase 3–4 generation instructions |

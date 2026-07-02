@@ -13,6 +13,10 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+# Executable wrapper installed to lib/spark_verify_pkg/ so `ros2 run
+# spark_verify_pkg block_vision_tracker` (and launch files) can find it.
+# See scripts/mock_camera_publisher for the full pattern explanation.
+
 from spark_verify_nodes.block_vision_tracker_node import main
 
 if __name__ == '__main__':

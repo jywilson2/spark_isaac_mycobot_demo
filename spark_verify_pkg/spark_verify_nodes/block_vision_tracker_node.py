@@ -12,7 +12,16 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""ROS node that publishes block detections from the mock camera stream."""
+"""
+ROS node that publishes block detections from the mock camera stream.
+
+ROS 2 FUNDAMENTALS — THE FILTER PATTERN: subscribe to one topic, transform
+each message, publish the result. This node is a pure function lifted into
+the graph: Image in -> BlockDetection out, with zero internal state. Note
+the separation of concerns: the detection ALGORITHM lives in
+block_vision_tracker.py (plain functions, unit-testable without ROS) and
+this file only handles the plumbing.
+"""
 
 import rclpy
 from rclpy.node import Node
@@ -35,11 +44,16 @@ class BlockVisionTrackerNode(Node):
         detection_topic = self.get_parameter('detection_topic').get_parameter_value().string_value
         red_threshold = self.get_parameter('red_threshold').get_parameter_value().integer_value
 
+        # Create the publisher BEFORE the subscription: the callback fires
+        # as soon as a frame arrives, and it must find the publisher ready.
         self._publisher = self.create_publisher(BlockDetection, detection_topic, 10)
         self._red_threshold = red_threshold
         self._subscription = self.create_subscription(Image, rgb_topic, self._on_rgb_frame, 10)
 
     def _on_rgb_frame(self, image: Image) -> None:
+        # One detection per frame, even when nothing is found (the message
+        # then carries detected=False). Downstream consumers can therefore
+        # tell "no block visible" apart from "vision node crashed".
         detection = to_block_detection(image, red_threshold=self._red_threshold)
         self._publisher.publish(detection)
 

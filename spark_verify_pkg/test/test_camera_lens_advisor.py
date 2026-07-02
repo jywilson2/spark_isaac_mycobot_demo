@@ -12,6 +12,16 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+# ---------------------------------------------------------------------------
+# TESTING FUNDAMENTALS — PURE PYTEST UNIT TESTS: Unlike the launch_testing
+# suites, this file never touches ROS: the lens advisor is plain math, so it
+# is tested as plain Python (registered in CMakeLists.txt with
+# ament_add_pytest_test). The recurring technique below is INDEPENDENT
+# RECOMPUTATION: each test re-derives the expected value from the pinhole
+# camera model itself rather than calling the code under test, so a shared
+# bug cannot cancel out.
+# ---------------------------------------------------------------------------
+
 import math
 
 import pytest
@@ -24,6 +34,9 @@ from spark_verify_nodes.camera_lens_advisor import (
 
 
 def expected_focal_length_mm(constraints: WorkspaceConstraints) -> float:
+    # Reference implementation of f = w / (2 * tan(FOV/2)) with
+    # tan(FOV/2) = (span * margin / 2) / distance — written independently
+    # of the production code on purpose.
     fov_rad = 2.0 * math.atan(
         (constraints.workspace_span_m * constraints.required_coverage_margin) /
         (2.0 * constraints.working_distance_m))
@@ -44,6 +57,10 @@ def test_focal_length_is_physically_plausible_for_m12_lenses():
 
 
 def test_wider_workspace_recommends_wider_lens():
+    # Monotonicity property: covering a wider workspace from the same
+    # distance requires a wider FOV, i.e. a SHORTER focal length. Both
+    # cases relax min_block_pixels because extreme spans shrink the
+    # block's pixel footprint below the default tracking floor.
     wide = WorkspaceConstraints(workspace_span_m=1.2, min_block_pixels=10.0)
     narrow = WorkspaceConstraints(workspace_span_m=0.3, min_block_pixels=10.0)
 
@@ -66,11 +83,16 @@ def test_block_pixel_extent_supports_vision_tracking_at_full_coverage():
 
 
 def test_unresolvable_block_raises_value_error():
+    # A 2 mm block across a 0.7 m frame subtends < 2 px at 640 wide — no
+    # lens choice can fix that, so the advisor must refuse rather than
+    # recommend optics that would silently break the vision tracker.
     tiny_block = WorkspaceConstraints(block_size_m=0.002)
     with pytest.raises(ValueError, match='px'):
         recommend_camera_lens(tiny_block)
 
 
+# parametrize runs the same test body once per listed input — one compact
+# definition yields six independently-reported test cases.
 @pytest.mark.parametrize('constraints', [
     WorkspaceConstraints(working_distance_m=0.0),
     WorkspaceConstraints(workspace_span_m=-0.1),

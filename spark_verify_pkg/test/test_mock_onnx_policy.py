@@ -12,12 +12,22 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+# ---------------------------------------------------------------------------
+# Pure pytest unit tests for the mock ONNX policy (no ROS required; see
+# test_camera_lens_advisor.py for how these are registered). The tests pin
+# the mock's DETERMINISM and its exact steering math, because downstream
+# serial-byte assertions in the phase 3/4 launch tests depend on the policy
+# emitting reproducible joint targets.
+# ---------------------------------------------------------------------------
+
 import pytest
 
 from spark_verify_nodes.mock_onnx_policy import MockPolicyWeights, run_mock_onnx_inference
 
 
 def build_observation(centroid_x=0.5, centroid_y=0.5, joints=None):
+    # Helper mirroring the observation layout contract from
+    # build_observation_vector: [cx, cy, bbox x4, ee height, grasp, joints].
     joints = joints if joints is not None else [0.4, -0.2, 0.6, -0.3, 0.5, -0.1]
     observation = [centroid_x, centroid_y, 0.4, 0.4, 0.6, 0.6, 0.12, 0.0]
     observation.extend(joints)
@@ -34,6 +44,9 @@ def test_inference_is_deterministic_and_six_dof():
 
 
 def test_centered_block_applies_only_joint_bias():
+    # With the block exactly at image center the centroid error is zero,
+    # so the steering delta vanishes and only the bias term remains —
+    # isolating one term of the policy equation.
     joints = [0.4, -0.2, 0.6, -0.3, 0.5, -0.1]
     targets = run_mock_onnx_inference(build_observation(joints=joints))
 
@@ -43,6 +56,9 @@ def test_centered_block_applies_only_joint_bias():
 
 
 def test_off_center_block_steers_joint_targets():
+    # Differential test: compare two runs that differ only in centroid_x,
+    # so the assertion isolates the proportional steering term without
+    # needing to know the bias values.
     centered = run_mock_onnx_inference(build_observation(centroid_x=0.5))
     off_center = run_mock_onnx_inference(build_observation(centroid_x=0.9))
 

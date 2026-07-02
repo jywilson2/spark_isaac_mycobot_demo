@@ -14,4 +14,10 @@
 
 """Python mirror of the MyCobot joint naming convention used by the C++ bridge."""
 
+# ROS 2 supports polyglot graphs: this package mixes rclcpp (C++) and rclpy
+# (Python) nodes that interoperate over the same DDS topics. What they must
+# share is the CONTRACT — message types, topic names, and here, joint names.
+# sensor_msgs/JointState consumers match joints by name, so the Python
+# dispatcher and the C++ articulation bridge must agree on these strings.
+# They mirror the joint names in the elephantrobotics/mycobot_ros2 URDF.
 DEFAULT_JOINT_NAMES = ['joint1', 'joint2', 'joint3', 'joint4', 'joint5', 'joint6']
