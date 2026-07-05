@@ -8,9 +8,9 @@ Automated pipeline for simulating the Elephant Robotics MyCobot 280 inside NVIDI
 |------|---------|
 | `spark_verify_pkg/` | ROS 2 verification package with mock and live ecosystem nodes and automated tests |
 | `isaac_sim/` | Isaac Sim scene builder, ROS 2 bridge config, and host-side live sim runner |
-| `scripts/` | Asset fetch, scene build, live sim launch, live test helpers, and repo permission repair |
-| `.devcontainer/` | Cursor/VS Code dev container config (runs as non-root `admin` user) |
-| `.vscode/` | Editor settings (integrated terminal drops to `admin` via `gosu`) |
+| `scripts/` | Asset fetch, scene build, live sim launch, live tests, container env helper, permission repair |
+| `.devcontainer/` | Optional Dev Containers config (not used for the DGX Spark `isaac-ros activate` workflow below) |
+| `.vscode/` | Editor settings (integrated terminal drops to `admin` via `gosu` if needed) |
 | `spec.md` | Full project specification and incremental backlog |
 | `REFERENCES.md` | Curated links: MyCobot 280 background, ROS 2 / Isaac / RL / edge-deployment reference material |
 | `commands/` | Agent command playbooks (`initial_project_generation*.md`, `test_live.md`) |
@@ -18,22 +18,73 @@ Automated pipeline for simulating the Elephant Robotics MyCobot 280 inside NVIDI
 | `initial_project_generation_phase2.md` | Phase 2 generation instructions |
 | `initial_project_generation_phase_remaining.md` | Phase 3–4 generation instructions |
 
-## Isaac ROS Dev Container (Non-Root User)
+## Development Workflow (Isaac ROS + Cursor on DGX Spark)
 
-This repository is developed inside an **Isaac ROS CLI** Docker container while **Isaac Sim runs on the host**. The workspace directory is bind-mounted from the host, so files created as **root** inside the container become unreadable to your host user (`git fetch`, `git pull`, and editor saves fail with *Permission denied*).
+This repository is developed inside an **Isaac ROS CLI** Docker container while **Isaac Sim runs on the host**. The colcon workspace is bind-mounted from the host (`~/workspaces/isaac_ros-dev` → `/workspaces/isaac_ros-dev`), so processes must run as your host user — not root — or git and file saves break on the host.
 
-Isaac ROS is designed to run as a non-root user (`admin`, uid/gid matching your host user). Cursor and some attach workflows may still connect as **root** unless configured. This repo ships dev-container settings so Cursor opens the environment as `admin` instead.
+### Verified daily startup
 
-### Prerequisites (host)
+Use this sequence every session (tested on DGX Spark with Cursor workspace restore):
+
+| Order | Where | Action |
+|-------|-------|--------|
+| 1 | **Host shell** (native terminal, outside Docker) | `isaac-ros activate` |
+| 2 | **Cursor** | Open Cursor — it auto-attaches to the running container when your last workspace is restored |
+| 3 | **Cursor terminal** | Confirm `whoami` → `admin` and `id` → uid **1000** (matches your host user) |
+| 4 | **Cursor terminal** | `source …/scripts/source_container_env.sh` then build/test ROS packages |
+
+**Step 1 — start the container on the host**
+
+```bash
+export ISAAC_ROS_WS="$HOME/workspaces/isaac_ros-dev"   # if not already in ~/.bashrc
+isaac-ros activate
+```
+
+NVIDIA's `run_dev.py` starts (or re-attaches to) the dev container, passes `HOST_USER_UID` / `HOST_USER_GID` from your host user, and drops interactive shells to **`admin`**. You may exit that host shell after the container is running — it stays up for Cursor.
+
+**Step 2 — Cursor attaches automatically**
+
+After `isaac-ros activate`, open Cursor on the Spark machine. When Cursor restores your last workspace (`spark_isaac_mycobot_demo`), it attaches to the already-running Isaac ROS container. You do **not** need **Dev Containers: Reopen in Container** or **Attach to Running Container** for this workflow.
+
+**Step 3 — verify identity in Cursor**
+
+```bash
+whoami          # admin
+id              # uid=1000 gid=1000
+git status      # should work without Permission denied
+```
+
+If `whoami` prints `root`, see [Troubleshooting](#isaac-ros--cursor-troubleshooting) below.
+
+**Step 4 — container environment variables**
+
+Isaac ROS bind-mounts your host `~/.bashrc` into `/home/admin/.bashrc` as **read-only**. Do not append exports there from inside the container. Instead, each Cursor session:
+
+```bash
+source /workspaces/isaac_ros-dev/src/spark_isaac_mycobot_demo/scripts/source_container_env.sh
+```
+
+That sets `ROS_DOMAIN_ID=42` and `FASTDDS_BUILTIN_TRANSPORTS=UDPv4` (required for Isaac Sim ↔ container ROS traffic).
+
+For **host** terminals (Isaac Sim), persist once in your host `~/.bashrc`:
+
+```bash
+export ROS_DOMAIN_ID=42
+export FASTDDS_BUILTIN_TRANSPORTS=UDPv4
+export ISAACSIM_PATH="$HOME/isaacsim"                  # adjust to your install
+export LD_PRELOAD="$LD_PRELOAD:/lib/aarch64-linux-gnu/libgomp.so.1"
+export ISAAC_ROS_WS="$HOME/workspaces/isaac_ros-dev"
+```
+
+### One-time setup (host)
 
 - Ubuntu 24.04 with NVIDIA GPU drivers (DGX Spark or compatible)
-- [Isaac ROS CLI](https://nvidia-isaac-ros.github.io/getting_started/index.html) installed on the host
-- Docker configured for your user (`sudo usermod -aG docker $USER`, then log out/in)
-- Git LFS installed (`sudo apt install git-lfs && git lfs install`)
+- [Isaac ROS CLI](https://nvidia-isaac-ros.github.io/getting_started/index.html) installed
+- Docker available to your user (`sudo usermod -aG docker $USER`, then log out/in)
+- Git LFS (`sudo apt install git-lfs && git lfs install`)
+- Isaac Sim 5.x / 6.x on the host (not inside Docker)
 
-### Step 1 — Create the Isaac ROS workspace on the host
-
-Pick a workspace path on the host (this guide uses `~/workspaces/isaac_ros-dev`):
+Clone into the Isaac ROS workspace:
 
 ```bash
 mkdir -p ~/workspaces/isaac_ros-dev/src
@@ -42,84 +93,55 @@ git clone git@github.com:jywilson2/spark_isaac_mycobot_demo.git
 cd spark_isaac_mycobot_demo
 git checkout wip_live_testing   # or your working branch
 git submodule update --init --recursive
+./scripts/fetch_mycobot_assets.sh
 ```
 
-Set `ISAAC_ROS_WS` (or `ISAAC_DIR`) to your workspace root and add it to `~/.bashrc`:
+Build ROS packages (first time, or after code changes — in Cursor):
 
 ```bash
-export ISAAC_ROS_WS="$HOME/workspaces/isaac_ros-dev"
-echo 'export ISAAC_ROS_WS="$HOME/workspaces/isaac_ros-dev"' >> ~/.bashrc
+source /workspaces/isaac_ros-dev/src/spark_isaac_mycobot_demo/scripts/source_container_env.sh
+source /opt/ros/jazzy/setup.bash
+cd /workspaces/isaac_ros-dev
+colcon build --packages-select spark_verify_pkg
+source install/setup.bash
 ```
 
-The Isaac ROS CLI mounts `${ISAAC_ROS_WS}` into the container at `/workspaces/isaac_ros-dev`.
+### Terminal layout (live Isaac Sim + training prep)
 
-### Step 2 — Start the Isaac ROS container (host)
+| Terminal | Machine | Role |
+|----------|---------|------|
+| **A** | Host | `./scripts/run_live_sim.sh` — MyCobot scene + ROS 2 bridge |
+| **B** | Cursor (container) | `ros2 topic hz /clock`, live launch files, integration tests |
+| **C** | Host (future) | Isaac Lab PPO training (not yet scripted in this repo) |
 
-From the host, activate the dev environment once so the cached Docker image is available:
+Isaac Sim always runs on the **host**. ROS nodes and tests run in the **container** (Cursor).
 
-```bash
-isaac-ros activate
-```
+### Repair root-owned files
 
-This runs NVIDIA's `run_dev.py`, which:
-
-- Passes `HOST_USER_UID` / `HOST_USER_GID` from your host user into the container
-- Runs `/usr/local/bin/scripts/workspace-entrypoint.sh`, which maps the `admin` user to your host uid/gid
-- Drops to `admin` for interactive shells started via `isaac-ros activate`
-
-You can exit that shell after the container is running; the container stays up for Cursor.
-
-### Step 3 — Open in Cursor as `admin` (not root)
-
-**Use Dev Containers: Reopen in Container** on the `spark_isaac_mycobot_demo` folder. This repo's `.devcontainer/devcontainer.json` sets `"remoteUser": "admin"` and reuses the Isaac ROS cached image (`cached_isaac_run_dev_image_local:latest` by default).
-
-Do **not** use **Attach to Running Container** for day-to-day work — that path often ignores `remoteUser` and connects as root, which recreates the ownership problem.
-
-Verify in a new Cursor terminal:
-
-```bash
-whoami    # admin
-id        # uid=1000 (matches your host user)
-git status
-```
-
-If you must attach to an already-running container temporarily, new integrated terminals still drop to `admin` via the `gosu` profile in `.vscode/settings.json` — but reconnecting with **Reopen in Container** is the reliable fix.
-
-### Step 4 — Repair root-owned files (one-time or after mistakes)
-
-If git or the host reports *Permission denied* on `.git/` after editing as root, run on the **host**:
+If git on the host reports *Permission denied* on `.git/` (usually after editing as root inside the container):
 
 ```bash
 cd ~/workspaces/isaac_ros-dev/src/spark_isaac_mycobot_demo
 ./scripts/fix_repo_permissions.sh
 ```
 
-Or from inside the container as root:
+### Isaac ROS + Cursor troubleshooting
 
-```bash
-sudo ./scripts/fix_repo_permissions.sh
-```
+**`whoami` is `root` in Cursor**
 
-The script `chown`s the repo (including submodule `.git/modules` metadata) to `HOST_USER_UID`/`HOST_USER_GID` when set, or your current uid/gid otherwise, and removes stale git lock files.
+The bind-mounted workspace was likely modified as root. Run `./scripts/fix_repo_permissions.sh` on the host, then restart from host: `isaac-ros activate` → reopen Cursor.
 
-### Dev container files in this repo
+**Cursor shows “container is not linked to any local workspace”**
 
-| File | Purpose |
-|------|---------|
-| `.devcontainer/devcontainer.json` | `remoteUser: admin`, workspace mount, post-start git safe-directory |
-| `.devcontainer/docker-compose.yml` | GPU, host network, Isaac ROS entrypoint, workspace bind-mount |
-| `.vscode/settings.json` | Terminal profile: `gosu admin /bin/bash -l` |
-| `scripts/fix_repo_permissions.sh` | One-time ownership repair after root edits |
+This appears if you manually choose **Attach to Running Container** instead of letting Cursor restore the workspace after `isaac-ros activate`. For the Spark workflow, always start the container with `isaac-ros activate` on the host first, then open Cursor normally — do not attach manually.
 
-### Optional — override the Docker image name
+**`~/.bashrc: Read-only file system` in the container**
 
-If your Isaac ROS image tag differs from the default cache, set this on the host before **Reopen in Container**:
+Expected. Isaac ROS mounts the host `.bashrc` read-only. Use `scripts/source_container_env.sh` in container sessions and edit **host** `~/.bashrc` for host-side exports.
 
-```bash
-export ISAAC_ROS_DEV_IMAGE="$(docker images --format '{{.Repository}}:{{.Tag}}' | grep isaac | head -1)"
-```
+**`.devcontainer/` in this repo**
 
-Then rebuild/reopen the dev container from Cursor.
+The `.devcontainer/` files are an optional alternative for machines that launch containers through **Reopen in Container**. They are **not** part of the DGX Spark `isaac-ros activate` → Cursor auto-attach workflow above.
 
 ## Completed Phases
 
@@ -284,56 +306,44 @@ runtime (some container images), force the GCC toolchain:
 CC=gcc CXX=g++ colcon build --packages-select spark_verify_pkg
 ```
 
-## Running Isaac Sim
+## Running Isaac Sim (Live Phase 1 & 2 / Training Prep)
 
 Live Phase 1 and Phase 2 require **Isaac Sim running on the host** with the ROS 2 bridge active. Mock `colcon test` and mock launch files do **not** need Isaac Sim.
 
-This workflow follows the same host ↔ Docker networking pattern as [`spark_isaac_sim_robot_demo`](../spark_isaac_sim_robot_demo/README.md) in this workspace.
+This workflow follows the same host ↔ Docker networking pattern as [`spark_isaac_sim_robot_demo`](../spark_isaac_sim_robot_demo/README.md) in this workspace. Complete [Development Workflow](#development-workflow-isaac-ros--cursor-on-dgx-spark) first (`isaac-ros activate` → Cursor as `admin`).
 
 ### Prerequisites
 
-- **Isaac ROS CLI** dev container opened as **`admin`** (see [Isaac ROS Dev Container](#isaac-ros-dev-container-non-root-user)) on DGX Spark or compatible platform
+- Isaac ROS container running (`isaac-ros activate` on host) and Cursor attached as **`admin`**
 - **Isaac Sim 5.x / 6.x** on the **host** (not inside Docker)
-- Matching **`ROS_DOMAIN_ID`** on host and in Docker (this guide uses `42`)
-- **`FASTDDS_BUILTIN_TRANSPORTS=UDPv4`** on host and in Docker (required for Isaac Sim ↔ container communication)
+- Matching **`ROS_DOMAIN_ID`** on host and in container (this guide uses `42`)
+- **`FASTDDS_BUILTIN_TRANSPORTS=UDPv4`** on host and in container (required for Isaac Sim ↔ container communication)
 
-Set these in **every** host and Cursor terminal before ROS commands:
-
-```bash
-export ROS_DOMAIN_ID=42
-export FASTDDS_BUILTIN_TRANSPORTS=UDPv4
-```
-
-Persist inside the dev container (optional):
-
-```bash
-echo 'export ROS_DOMAIN_ID=42' >> ~/.bashrc
-echo 'export FASTDDS_BUILTIN_TRANSPORTS=UDPv4' >> ~/.bashrc
-```
-
-Also set `FASTDDS_BUILTIN_TRANSPORTS=UDPv4` on the host **before** launching Isaac Sim.
-
-### Step 1 — Launch Isaac Sim on the host
-
-In a **native host terminal** (outside Docker):
+**Host** — add once to `~/.bashrc`:
 
 ```bash
 export ROS_DOMAIN_ID=42
 export FASTDDS_BUILTIN_TRANSPORTS=UDPv4
+export ISAACSIM_PATH="$HOME/isaacsim"
 export LD_PRELOAD="$LD_PRELOAD:/lib/aarch64-linux-gnu/libgomp.so.1"
-${ISAACSIM_PATH}/isaac-sim.sh
 ```
 
-If Isaac Sim is installed elsewhere, run `./isaac-sim.sh` from your Isaac Sim install directory.
-
-### Step 2 — Fetch assets and build the MyCobot scene
-
-The **Limo Cobot** mobile manipulator ships with a **myCobot 280 M5** arm. This repository vendors upstream meshes via a git submodule and provides an Isaac Sim standalone scene builder.
-
-**Inside the Isaac ROS container (or any git checkout):**
+**Container (Cursor)** — each session:
 
 ```bash
-cd /path/to/spark_isaac_mycobot_demo
+source /workspaces/isaac_ros-dev/src/spark_isaac_mycobot_demo/scripts/source_container_env.sh
+```
+
+Set `FASTDDS_BUILTIN_TRANSPORTS=UDPv4` on the host **before** launching Isaac Sim.
+
+### Step 1 — Fetch assets (container, one-time or after clone)
+
+The **Limo Cobot** mobile manipulator ships with a **myCobot 280 M5** arm. This repository vendors upstream meshes via a git submodule.
+
+In a **Cursor terminal**:
+
+```bash
+cd /workspaces/isaac_ros-dev/src/spark_isaac_mycobot_demo
 ./scripts/fetch_mycobot_assets.sh
 ```
 
@@ -341,14 +351,16 @@ This initializes `third_party/mycobot_ros2` (branch `humble`) and verifies:
 
 `third_party/mycobot_ros2/mycobot_description/urdf/mycobot_280_m5/mycobot_280_m5.urdf`
 
-**On the Isaac Sim host** (outside Docker), build the workspace scene USD:
+### Step 2 — Build the MyCobot scene (host, first run or after URDF changes)
+
+In a **native host terminal** (outside Docker):
 
 ```bash
 export ROS_DOMAIN_ID=42
 export FASTDDS_BUILTIN_TRANSPORTS=UDPv4
-export ISAACSIM_PATH=/path/to/isaac-sim   # your install
+export ISAACSIM_PATH="$HOME/isaacsim"
 
-cd /path/to/spark_isaac_mycobot_demo
+cd ~/workspaces/isaac_ros-dev/src/spark_isaac_mycobot_demo
 ./scripts/build_isaac_scene.sh
 ```
 
@@ -363,18 +375,25 @@ The scene builder embeds the ROS 2 OmniGraph bridge (`--with-ros2-bridge`) for l
 
 ### Step 3 — Start live Isaac Sim with ROS 2 bridge (host)
 
-In a **native host terminal**:
+In a **native host terminal** — keep this running for all live work:
 
 ```bash
 export ROS_DOMAIN_ID=42
 export FASTDDS_BUILTIN_TRANSPORTS=UDPv4
-export ISAACSIM_PATH=/path/to/isaac-sim
+export ISAACSIM_PATH="$HOME/isaacsim"
+export LD_PRELOAD="$LD_PRELOAD:/lib/aarch64-linux-gnu/libgomp.so.1"
 
-cd /path/to/spark_isaac_mycobot_demo
+cd ~/workspaces/isaac_ros-dev/src/spark_isaac_mycobot_demo
 ./scripts/run_live_sim.sh
 ```
 
-This rebuilds/opens the scene, enables the bridge, and presses **Play**. Expected host topics:
+This rebuilds/opens the scene if needed, enables the bridge, and presses **Play**. For long unattended runs:
+
+```bash
+./scripts/run_live_sim.sh --headless
+```
+
+Expected host topics:
 
 | Topic | Message type | Role |
 |-------|--------------|------|
@@ -383,20 +402,34 @@ This rebuilds/opens the scene, enables the bridge, and presses **Play**. Expecte
 | `/mycobot/joint_states` | `sensor_msgs/msg/JointState` | Live articulation feedback |
 | `/mycobot/camera/rgb` | `sensor_msgs/msg/Image` | Workspace camera |
 
-Keep the live sim running for Docker-side verification.
+**Alternative (manual GUI):** open `${ISAACSIM_PATH}/isaac-sim.sh`, load the scene USD, and press **Play** yourself. The scripted path above is preferred because it configures the ROS 2 bridge automatically.
 
-### Step 4 — Launch Docker-side live stacks
-
-**Live Phase 1 (joint + NITROS adapter):**
+### Step 4 — Verify bridge (Cursor terminal)
 
 ```bash
-export ROS_DOMAIN_ID=42
-export FASTDDS_BUILTIN_TRANSPORTS=UDPv4
+source /workspaces/isaac_ros-dev/src/spark_isaac_mycobot_demo/scripts/source_container_env.sh
+ros2 topic hz /clock
+ros2 topic list | grep mycobot
+```
+
+Expect `/clock` at a non-zero rate (often ~25 Hz). Press `Ctrl+C` to stop.
+
+If topics appear on the host but not in the container, set `FASTDDS_BUILTIN_TRANSPORTS=UDPv4` on **both** sides and restart `./scripts/run_live_sim.sh`. See [Isaac Sim troubleshooting](#isaac-sim-troubleshooting).
+
+### Step 5 — Launch Docker-side live stacks (Cursor)
+
+```bash
+source /workspaces/isaac_ros-dev/src/spark_isaac_mycobot_demo/scripts/source_container_env.sh
 source /workspaces/isaac_ros-dev/install/setup.bash
+```
+
+**Live Phase 1** (joint + NITROS adapter):
+
+```bash
 ros2 launch spark_verify_pkg phase1_live_ecosystem.launch.py
 ```
 
-**Live Phase 2 (vision + RL observation + MDP monitor):**
+**Live Phase 2** (vision + RL observation + MDP monitor — required before training):
 
 ```bash
 ros2 launch spark_verify_pkg phase2_live_ecosystem.launch.py
@@ -404,19 +437,15 @@ ros2 launch spark_verify_pkg phase2_live_ecosystem.launch.py
 
 Do **not** use `phase1_mock_ecosystem.launch.py` or `phase2_mock_ecosystem.launch.py` for live acceptance.
 
-**Bridge sanity check (Cursor terminal):**
+**Phase 2 gate** — confirm the training pipeline topics:
 
 ```bash
-export ROS_DOMAIN_ID=42
-export FASTDDS_BUILTIN_TRANSPORTS=UDPv4
-ros2 topic hz /clock
+ros2 topic hz /mycobot/rl/observation
+ros2 topic echo /mycobot/rl/live_reward --once
+ros2 topic echo /mycobot/vision/block_detection --once
 ```
 
-Expect a non-zero rate (often ~25 Hz). Press `Ctrl+C` to stop.
-
-If `ros2 topic list` shows topics but `hz` hangs, set `FASTDDS_BUILTIN_TRANSPORTS=UDPv4` on **both** host and Docker and restart Isaac Sim. See [Troubleshooting](#isaac-sim-troubleshooting).
-
-### Step 5 — Expected live topics (Phase 1 & 2)
+### Step 6 — Expected live topics (Phase 1 & 2)
 
 These are the **live** endpoints verified by live integration tests (mock topics are **not** substitutes):
 
@@ -436,41 +465,40 @@ These are the **live** endpoints verified by live integration tests (mock topics
 Verify publishers before live tests:
 
 ```bash
-export ROS_DOMAIN_ID=42
-export FASTDDS_BUILTIN_TRANSPORTS=UDPv4
+source /workspaces/isaac_ros-dev/src/spark_isaac_mycobot_demo/scripts/source_container_env.sh
 ros2 topic info /clock
 ros2 topic list | grep mycobot
 ```
 
 You need **Publisher count: 1** (or more) on `/clock` and live sim topics while **Play** is active.
 
-### Step 6 — Run live integration tests
+### Step 7 — Run live integration tests (pre-training gate)
 
 With Isaac Sim playing (`./scripts/run_live_sim.sh` on host):
 
 ```bash
-export ROS_DOMAIN_ID=42
-export FASTDDS_BUILTIN_TRANSPORTS=UDPv4
-cd /path/to/spark_isaac_mycobot_demo
+source /workspaces/isaac_ros-dev/src/spark_isaac_mycobot_demo/scripts/source_container_env.sh
+cd /workspaces/isaac_ros-dev/src/spark_isaac_mycobot_demo
 ./scripts/run_live_tests.sh
 ```
 
 Or from the workspace manually:
 
 ```bash
+source /workspaces/isaac_ros-dev/src/spark_isaac_mycobot_demo/scripts/source_container_env.sh
 source /opt/ros/jazzy/setup.bash
-cd ${ISAAC_ROS_WS:-/workspaces/isaac_ros-dev}
+cd /workspaces/isaac_ros-dev
 colcon build --packages-select spark_verify_pkg
 source install/setup.bash
-export ROS_DOMAIN_ID=42
-export FASTDDS_BUILTIN_TRANSPORTS=UDPv4
 colcon test --packages-select spark_verify_pkg --event-handlers console_direct+
 colcon test-result --all
 ```
 
 Live tests (`test_phase1_live_integration.py`, `test_phase2_live_integration.py`) **auto-skip** when `/clock` is unavailable. Force skip in CI/mock runs with `SPARK_SKIP_LIVE_SIM_TESTS=1`.
 
-### Step 7 — Agent-driven live verification playbook
+**Do not start Isaac Lab training until Step 7 passes.**
+
+### Step 8 — Agent-driven live verification playbook
 
 Use the live testing playbook:
 
@@ -486,22 +514,31 @@ ros2 launch spark_verify_pkg phase1_mock_ecosystem.launch.py
 ros2 launch spark_verify_pkg phase2_mock_ecosystem.launch.py
 ```
 
-### Step 8 — Isaac Lab (Live Phase 2 training)
+### Step 9 — Isaac Lab (Live Phase 2 training)
 
-Live Phase 2 RL work additionally requires **Isaac Lab** with the MDP environment using **live** sim camera observations (not mock `mock_camera_publisher` or synthetic block painting). Start Isaac Sim and load the MyCobot scene first; then launch Isaac Lab training or live MDP smoke tests against the running sim.
+Isaac Lab policy training runs on the **host** alongside the live sim. Prerequisites:
+
+1. Steps 1–7 complete (sim playing, Phase 2 stack running, live tests green)
+2. **Isaac Lab** installed on the host, version-matched to your Isaac Sim build
+3. Terminal A: `./scripts/run_live_sim.sh` (host)
+4. Terminal B: `phase2_live_ecosystem.launch.py` (Cursor)
+5. Terminal C: Isaac Lab trainer (host — **not yet scripted** in this repo)
+
+The live MDP facade is `IsaacLabMyCobotPickPlaceEnv` (`isaac_lab_mdp_env.py`), wired to live ROS topics via the Phase 2 stack. A dedicated training launcher will be added once the end-to-end live pipeline is verified on hardware.
 
 ### Quick reference checklist
 
 | Step | Where | Action |
 |------|-------|--------|
-| 1 | Host | Export `ROS_DOMAIN_ID=42` and `FASTDDS_BUILTIN_TRANSPORTS=UDPv4` |
-| 2 | Container | `./scripts/fetch_mycobot_assets.sh` |
-| 3 | Host | `./scripts/build_isaac_scene.sh` or `./scripts/run_live_sim.sh` |
-| 4 | Host | Keep live sim playing (bridge publishing `/clock`) |
-| 5 | Cursor | `ros2 topic hz /clock` → expect non-zero rate |
-| 6 | Cursor | `ros2 launch spark_verify_pkg phase1_live_ecosystem.launch.py` |
-| 7 | Cursor | `ros2 launch spark_verify_pkg phase2_live_ecosystem.launch.py` |
-| 8 | Cursor | `./scripts/run_live_tests.sh` or `@commands/test_live.md` |
+| 0 | Host | `isaac-ros activate`, then open Cursor (auto-attach) |
+| 0 | Cursor | `whoami` → `admin`; `source …/scripts/source_container_env.sh` |
+| 1 | Cursor | `./scripts/fetch_mycobot_assets.sh` (one-time) |
+| 2 | Host | `./scripts/build_isaac_scene.sh` (first run / URDF changes) |
+| 3 | Host | `./scripts/run_live_sim.sh` — keep running |
+| 4 | Cursor | `ros2 topic hz /clock` → non-zero rate |
+| 5 | Cursor | `ros2 launch spark_verify_pkg phase2_live_ecosystem.launch.py` |
+| 6 | Cursor | `./scripts/run_live_tests.sh` — must pass before training |
+| 7 | Host | Isaac Lab training (future — see Step 9) |
 
 ### Isaac Sim troubleshooting
 
@@ -557,7 +594,7 @@ Mock verification phases validate ROS 2 contracts without Isaac Sim. **Live Phas
 
 - **OS:** Ubuntu 24.04 (DGX OS 7.2.3) via NVIDIA Spark Platform
 - **ROS:** ROS 2 Jazzy (Isaac ROS CLI container)
-- **Simulation:** NVIDIA Isaac Sim / Isaac Lab (required for live Phase 1–2; see [Running Isaac Sim](#running-isaac-sim))
+- **Simulation:** NVIDIA Isaac Sim / Isaac Lab (required for live Phase 1–2; see [Running Isaac Sim](#running-isaac-sim-live-phase-1--2--training-prep))
 - **Hardware target:** Elephant Robotics MyCobot 280
 - **Edge target:** Raspberry Pi + AI Hat Board
 
