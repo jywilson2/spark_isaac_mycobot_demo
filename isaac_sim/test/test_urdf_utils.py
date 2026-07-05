@@ -8,7 +8,9 @@ import pytest
 
 from isaac_sim.urdf_utils import (
     default_upstream_urdf,
+    replace_g_base_mesh_with_box,
     resolve_mycobot_280_m5_package_uris,
+    sanitize_collada_materials,
     write_isaac_ready_urdf,
 )
 
@@ -49,3 +51,31 @@ def test_write_isaac_ready_urdf_rewrites_mesh_paths(tmp_path: Path) -> None:
     text = output_urdf.read_text(encoding="utf-8")
     assert "package://" not in text
     assert 'filename="joint1.dae"' in text
+
+
+def test_replace_g_base_mesh_with_box() -> None:
+    sample = '<mesh filename="G_base.dae"/>'
+    replaced = replace_g_base_mesh_with_box(sample)
+    assert 'G_base.dae' not in replaced
+    assert '<box size="0.12 0.12 0.06"/>' in replaced
+
+
+def test_sanitize_collada_materials_rewrites_guid_material_ids(tmp_path: Path) -> None:
+    guid = "a0000000-0000-0000-0000-000000000000"
+    dae_path = tmp_path / "G_base.dae"
+    dae_path.write_text(
+        "\n".join(
+            [
+                f'<material id="{guid}">',
+                f'<instance_effect url="#fx-{guid}" />',
+                f"<triangles material='material-{guid}' />",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    assert sanitize_collada_materials(dae_path) is True
+    sanitized = dae_path.read_text(encoding="utf-8")
+    assert guid not in sanitized
+    assert "material_G_base" in sanitized
+    assert "fx_material_G_base" in sanitized

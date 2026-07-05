@@ -9,16 +9,14 @@ export ROS_DOMAIN_ID="${ROS_DOMAIN_ID:-42}"
 export FASTDDS_BUILTIN_TRANSPORTS="${FASTDDS_BUILTIN_TRANSPORTS:-UDPv4}"
 export PYTHONPATH="${REPO_ROOT}${PYTHONPATH:+:${PYTHONPATH}}"
 
-if [[ -z "${ISAACSIM_PATH:-}" ]]; then
-  echo "Set ISAACSIM_PATH to your Isaac Sim install directory." >&2
-  exit 1
+if [[ -z "${ISAACSIM_PATH:-}" ]] && [[ -z "${ISAACSIM_PYTHON_EXE:-}" ]]; then
+  echo "Hint: run ./scripts/isaac_sim_env.sh to auto-detect, or set ISAACSIM_PATH." >&2
 fi
 
-PYTHON_SH="${ISAACSIM_PATH}/python.sh"
-if [[ ! -x "${PYTHON_SH}" ]]; then
-  echo "Isaac Sim python launcher not found: ${PYTHON_SH}" >&2
-  exit 1
-fi
+# shellcheck source=isaac_sim_env.sh
+source "${SCRIPT_DIR}/isaac_sim_env.sh"
+require_isaac_python || exit 1
+PYTHON_SH="${ISAACSIM_PYTHON_EXE}"
 
 if ! git -C "${REPO_ROOT}" submodule update --init --recursive third_party/mycobot_ros2 2>&1; then
   echo >&2

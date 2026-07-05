@@ -2,6 +2,8 @@
 
 Automated pipeline for simulating the Elephant Robotics MyCobot 280 inside NVIDIA Isaac Sim via ROS 2 Jazzy, training a pick-and-place policy in Isaac Lab, and deploying to a Raspberry Pi with an AI Hat accelerator.
 
+**Returning after a break?** Read [docs/project_status.md](docs/project_status.md) for a concise “where we left off” briefing (scene build status, live verification gate, Isaac Lab training next steps).
+
 ## Repository Layout
 
 | Path | Purpose |
@@ -9,6 +11,8 @@ Automated pipeline for simulating the Elephant Robotics MyCobot 280 inside NVIDI
 | `spark_verify_pkg/` | ROS 2 verification package with mock and live ecosystem nodes and automated tests |
 | `isaac_sim/` | Isaac Sim scene builder, ROS 2 bridge config, and host-side live sim runner |
 | `scripts/` | Asset fetch, scene build, live sim launch, live tests, container env helper, permission repair |
+| `scripts/host/` | **Host-only** Isaac Sim iteration scripts (URDF probe, logged scene build) — see [docs/isaac_sim_host_scripts.md](docs/isaac_sim_host_scripts.md) |
+| `docs/` | Extended guides: [host scripts](docs/isaac_sim_host_scripts.md), [project status / resume briefing](docs/project_status.md) |
 | `.devcontainer/` | Optional Dev Containers config (not used for the DGX Spark `isaac-ros activate` workflow below) |
 | `.vscode/` | Editor settings (integrated terminal drops to `admin` via `gosu` if needed) |
 | `spec.md` | Full project specification and incremental backlog |
@@ -71,7 +75,8 @@ For **host** terminals (Isaac Sim), persist once in your host `~/.bashrc`:
 ```bash
 export ROS_DOMAIN_ID=42
 export FASTDDS_BUILTIN_TRANSPORTS=UDPv4
-export ISAACSIM_PATH="$HOME/isaacsim"                  # adjust to your install
+export ISAACSIM_PATH="${ISAACSIM_PATH:-$HOME/IsaacSim/_build/linux-aarch64/release}"  # or $HOME/isaacsim for pre-built install
+export ISAACSIM_PYTHON_EXE="${ISAACSIM_PYTHON_EXE:-${ISAACSIM_PATH}/python.sh}"
 export LD_PRELOAD="$LD_PRELOAD:/lib/aarch64-linux-gnu/libgomp.so.1"
 export ISAAC_ROS_WS="$HOME/workspaces/isaac_ros-dev"
 ```
@@ -324,7 +329,8 @@ This workflow follows the same host ↔ Docker networking pattern as [`spark_isa
 ```bash
 export ROS_DOMAIN_ID=42
 export FASTDDS_BUILTIN_TRANSPORTS=UDPv4
-export ISAACSIM_PATH="$HOME/isaacsim"
+export ISAACSIM_PATH="${ISAACSIM_PATH:-$HOME/IsaacSim/_build/linux-aarch64/release}"  # or $HOME/isaacsim for pre-built install
+export ISAACSIM_PYTHON_EXE="${ISAACSIM_PYTHON_EXE:-${ISAACSIM_PATH}/python.sh}"
 export LD_PRELOAD="$LD_PRELOAD:/lib/aarch64-linux-gnu/libgomp.so.1"
 ```
 
@@ -353,12 +359,25 @@ This initializes `third_party/mycobot_ros2` (branch `humble`) and verifies:
 
 ### Step 2 — Build the MyCobot scene (host, first run or after URDF changes)
 
-In a **native host terminal** (outside Docker):
+Isaac Sim runs on the **host only**. Use a **native host terminal** (not the Cursor container).
+
+**Recommended for debugging** (timestamped logs under `assets/logs/isaac_host/`):
+
+```bash
+cd ~/workspaces/isaac_ros-dev/src/spark_isaac_mycobot_demo
+./scripts/host/check_prereqs.sh
+./scripts/host/iter_urdf_import.sh       # fast URDF-only probe (~10–90 s)
+./scripts/host/iter_build_isaac_scene.sh # full scene build
+```
+
+See [docs/isaac_sim_host_scripts.md](docs/isaac_sim_host_scripts.md) for what each script does and why.
+
+**Production one-liner** (after URDF import is known good):
 
 ```bash
 export ROS_DOMAIN_ID=42
 export FASTDDS_BUILTIN_TRANSPORTS=UDPv4
-export ISAACSIM_PATH="$HOME/isaacsim"
+export ISAACSIM_PATH="${ISAACSIM_PATH:-$HOME/isaacsim}"   # or source-build path; see ./scripts/isaac_sim_env.sh
 
 cd ~/workspaces/isaac_ros-dev/src/spark_isaac_mycobot_demo
 ./scripts/build_isaac_scene.sh
@@ -370,8 +389,11 @@ Output:
 |----------|------|
 | Scene USD | `assets/scenes/mycobot_280_m5_limo_cobot.usd` |
 | Isaac-ready URDF + meshes | `assets/robots/mycobot_280_m5_limo_cobot/` |
+| Robot USD (Isaac Sim 6) | `assets/robots/mycobot_280_m5_limo_cobot/mycobot_280_m5_limo_cobot/*.usda` |
 
-The scene builder embeds the ROS 2 OmniGraph bridge (`--with-ros2-bridge`) for live topics.
+**Note:** The robot base link uses a **box placeholder** instead of upstream `G_base.dae` because Isaac Sim 6.x fails to import that COLLADA mesh (material ID bug). Arm links use the original meshes.
+
+The scene builder can embed the ROS 2 OmniGraph bridge (`--with-ros2-bridge`) for live topics; `run_live_sim.sh` also configures the bridge at runtime.
 
 ### Step 3 — Start live Isaac Sim with ROS 2 bridge (host)
 
@@ -380,7 +402,8 @@ In a **native host terminal** — keep this running for all live work:
 ```bash
 export ROS_DOMAIN_ID=42
 export FASTDDS_BUILTIN_TRANSPORTS=UDPv4
-export ISAACSIM_PATH="$HOME/isaacsim"
+export ISAACSIM_PATH="${ISAACSIM_PATH:-$HOME/IsaacSim/_build/linux-aarch64/release}"  # or $HOME/isaacsim for pre-built install
+export ISAACSIM_PYTHON_EXE="${ISAACSIM_PYTHON_EXE:-${ISAACSIM_PATH}/python.sh}"
 export LD_PRELOAD="$LD_PRELOAD:/lib/aarch64-linux-gnu/libgomp.so.1"
 
 cd ~/workspaces/isaac_ros-dev/src/spark_isaac_mycobot_demo
@@ -516,15 +539,17 @@ ros2 launch spark_verify_pkg phase2_mock_ecosystem.launch.py
 
 ### Step 9 — Isaac Lab (Live Phase 2 training)
 
-Isaac Lab policy training runs on the **host** alongside the live sim. Prerequisites:
+Isaac Lab policy training runs on the **host** alongside the live sim. **Training is not yet scripted in this repo** — see [docs/project_status.md](docs/project_status.md) for the resume checklist and remaining work.
+
+Prerequisites:
 
 1. Steps 1–7 complete (sim playing, Phase 2 stack running, live tests green)
 2. **Isaac Lab** installed on the host, version-matched to your Isaac Sim build
 3. Terminal A: `./scripts/run_live_sim.sh` (host)
 4. Terminal B: `phase2_live_ecosystem.launch.py` (Cursor)
-5. Terminal C: Isaac Lab trainer (host — **not yet scripted** in this repo)
+5. Terminal C: Isaac Lab trainer (host — **to be added**)
 
-The live MDP facade is `IsaacLabMyCobotPickPlaceEnv` (`isaac_lab_mdp_env.py`), wired to live ROS topics via the Phase 2 stack. A dedicated training launcher will be added once the end-to-end live pipeline is verified on hardware.
+The live MDP facade is `IsaacLabMyCobotPickPlaceEnv` (`isaac_lab_mdp_env.py`), wired to live ROS topics via the Phase 2 stack.
 
 ### Quick reference checklist
 
@@ -533,7 +558,7 @@ The live MDP facade is `IsaacLabMyCobotPickPlaceEnv` (`isaac_lab_mdp_env.py`), w
 | 0 | Host | `isaac-ros activate`, then open Cursor (auto-attach) |
 | 0 | Cursor | `whoami` → `admin`; `source …/scripts/source_container_env.sh` |
 | 1 | Cursor | `./scripts/fetch_mycobot_assets.sh` (one-time) |
-| 2 | Host | `./scripts/build_isaac_scene.sh` (first run / URDF changes) |
+| 2 | Host | `./scripts/host/iter_build_isaac_scene.sh` or `./scripts/build_isaac_scene.sh` |
 | 3 | Host | `./scripts/run_live_sim.sh` — keep running |
 | 4 | Cursor | `ros2 topic hz /clock` → non-zero rate |
 | 5 | Cursor | `ros2 launch spark_verify_pkg phase2_live_ecosystem.launch.py` |
@@ -575,18 +600,24 @@ ros2 node list
 | Item | Status |
 |------|--------|
 | `mycobot_ros2` submodule (`third_party/mycobot_ros2`, `humble`) | Ready — Limo Cobot arm = `mycobot_280_m5.urdf` |
-| Isaac Sim scene builder (`isaac_sim/build_mycobot_limo_cobot_scene.py`) | Ready — embeds ROS 2 bridge via `--with-ros2-bridge` |
-| Host live sim runner (`isaac_sim/run_mycobot_live_sim.py`) | Ready — `./scripts/run_live_sim.sh` |
-| Live Phase 1 Docker stack (`phase1_live_ecosystem.launch.py`) | Ready |
-| Live Phase 2 Docker stack (`phase2_live_ecosystem.launch.py`) | Ready |
-| Live integration tests (`test_phase*_live_integration.py`) | Ready — auto-skip without Isaac Sim |
-| Isaac Lab training loop against live sim | Use `IsaacLabMyCobotPickPlaceEnv` — training orchestration is operator-driven |
+| URDF → USD import (Isaac Sim 6.x) | Ready — `isaac_sim/urdf_import.py`; host probe: `./scripts/host/iter_urdf_import.sh` |
+| Isaac Sim scene builder | Ready — output: `assets/scenes/mycobot_280_m5_limo_cobot.usd` |
+| Host iteration scripts + logs | Ready — [docs/isaac_sim_host_scripts.md](docs/isaac_sim_host_scripts.md) |
+| Host live sim runner | Ready — `./scripts/run_live_sim.sh` |
+| Live Phase 1 Docker stack | Ready |
+| Live Phase 2 Docker stack | Ready |
+| Live integration tests | Ready — auto-skip without Isaac Sim |
+| End-to-end live test gate | **Run `./scripts/run_live_tests.sh` before training** |
+| Isaac Lab training loop | **Not scripted** — facade ready; see [docs/project_status.md](docs/project_status.md) |
 
 ## Live Integration (Phase 1–2 ready)
 
-Mock verification phases validate ROS 2 contracts without Isaac Sim. **Live Phase 1 and 2** are implemented as described above. Remaining work from `spec.md`:
+Mock verification phases validate ROS 2 contracts without Isaac Sim. **Live Phase 1 and 2** are implemented as described above. **Scene build on Isaac Sim 6.x is verified** (2026-07-05).
 
-- **Live Phase 2 training:** Run Isaac Lab policy training against the live MDP facade (scene + ROS topics must be playing).
+Remaining work from `spec.md` and [docs/project_status.md](docs/project_status.md):
+
+- **Live verification gate:** Run `./scripts/run_live_tests.sh` with sim playing (if not done recently).
+- **Live Phase 2 training:** Script Isaac Lab PPO against `IsaacLabMyCobotPickPlaceEnv` (scene + ROS topics must be playing).
 - **Live Phase 3:** Export real trained ONNX weights and connect to physical MyCobot via `pymycobot` serial.
 - **Live Phase 4:** Deploy to Raspberry Pi + AI Hat with live USB camera and physical MyCobot arm.
 

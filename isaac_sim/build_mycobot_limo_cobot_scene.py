@@ -27,11 +27,17 @@ if str(REPO_ROOT) not in sys.path:
 from isaac_sim.urdf_utils import (  # noqa: E402
     default_prepared_urdf,
     default_upstream_urdf,
+    sanitize_collada_materials_in_dir,
     write_isaac_ready_urdf,
 )
 from isaac_sim.ros2_bridge_config import (  # noqa: E402
     ROBOT_PRIM_PATH,
     configure_live_ros2_bridge,
+)
+from isaac_sim.urdf_import import (  # noqa: E402
+    URDF_IMPORTER_EXTENSION,
+    add_robot_reference_to_stage,
+    import_urdf_to_usd,
 )
 
 DEFAULT_SCENE_USD = (
@@ -114,19 +120,27 @@ def prepare_robot_assets(repo_root: Path, upstream_urdf: Path) -> Path:
         prepared_urdf,
         mesh_dir=prepared_dir,
     )
+    sanitize_collada_materials_in_dir(prepared_dir)
     return prepared_urdf
 
 
 def build_scene(args: argparse.Namespace) -> Path:
     from isaacsim import SimulationApp
 
-    simulation_app = SimulationApp({"headless": args.headless})
+    simulation_app = SimulationApp(
+        {
+            'headless': args.headless,
+            'extra_args': [
+                '--enable',
+                URDF_IMPORTER_EXTENSION,
+            ],
+        }
+    )
 
-    import omni.kit.commands  # noqa: WPS433
     import omni.timeline  # noqa: WPS433
     import omni.usd  # noqa: WPS433
     from isaacsim.core.utils.stage import create_new_stage  # noqa: WPS433
-    from pxr import Gf, Sdf, Usd, UsdGeom, UsdLux, UsdShade  # noqa: WPS433
+    from pxr import Gf, Sdf, UsdGeom, UsdLux, UsdShade  # noqa: WPS433
 
     repo_root = args.repo_root.resolve()
     upstream_urdf = (args.urdf or default_upstream_urdf(repo_root)).resolve()
@@ -137,32 +151,17 @@ def build_scene(args: argparse.Namespace) -> Path:
         )
 
     prepared_urdf = prepare_robot_assets(repo_root, upstream_urdf)
-    robot_usd = prepared_urdf.with_suffix(".usd")
+    robot_usd = prepared_urdf.with_suffix('.usd')
+
+    robot_usd_path = import_urdf_to_usd(
+        prepared_urdf=prepared_urdf,
+        output_usd=robot_usd,
+        simulation_app=simulation_app,
+    )
 
     create_new_stage()
 
-    status, import_config = omni.kit.commands.execute("URDFCreateImportConfig")
-    if not status:
-        raise RuntimeError("URDFCreateImportConfig failed")
-
-    import_config.merge_fixed_joints = False
-    import_config.convex_decomp = False
-    import_config.import_inertia_tensor = True
-    import_config.fix_base = True
-    import_config.self_collision = False
-    import_config.create_physics_scene = True
-    import_config.default_drive_type = 1  # position drive
-    import_config.default_drive_strength = 1.0e4
-    import_config.default_position_drive_damping = 1.0e3
-
-    status, prim_path = omni.kit.commands.execute(
-        "URDFParseAndImportFile",
-        urdf_path=str(prepared_urdf),
-        import_config=import_config,
-        dest_path=str(robot_usd),
-    )
-    if not status:
-        raise RuntimeError(f"URDF import failed for {prepared_urdf}")
+    prim_path = add_robot_reference_to_stage(robot_usd_path, ROBOT_PRIM_PATH)
 
     stage = omni.usd.get_context().get_stage()
     UsdGeom.SetStageUpAxis(stage, UsdGeom.Tokens.z)
@@ -204,14 +203,6 @@ def build_scene(args: argparse.Namespace) -> Path:
     if robot_prim.IsValid():
         robot_xform = UsdGeom.Xformable(robot_prim)
         robot_xform.AddTranslateOp().Set(Gf.Vec3d(0.0, 0.0, 0.78))
-        if str(prim_path) != ROBOT_PRIM_PATH:
-            omni.kit.commands.execute(
-                'MovePrim',
-                path_from=str(prim_path),
-                path_to=str(ROBOT_PRIM_PATH),
-            )
-            prim_path = ROBOT_PRIM_PATH
-            robot_prim = stage.GetPrimAtPath(prim_path)
 
     block_material = UsdShade.Material.Define(stage, world_path.AppendPath("PickBlockMaterial"))
     shader = UsdShade.Shader.Define(stage, block_material.GetPath().AppendPath("Shader"))
@@ -221,10 +212,17 @@ def build_scene(args: argparse.Namespace) -> Path:
     UsdShade.MaterialBindingAPI(block).Bind(block_material)
 
     if args.with_ros2_bridge:
-        configure_live_ros2_bridge(
-            robot_prim_path=str(prim_path),
-            camera_prim_path=str(camera_path),
-        )
+        try:
+            configure_live_ros2_bridge(
+                robot_prim_path=str(prim_path),
+                camera_prim_path=str(camera_path),
+            )
+        except Exception as exc:  # noqa: BLE001 - bridge can be added at live sim runtime
+            print(
+                f'Warning: could not embed ROS 2 bridge in scene USD ({exc}). '
+                'run_live_sim.sh configures the bridge when loading the scene.',
+                file=sys.stderr,
+            )
 
     save_path = args.save_usd.resolve()
     save_path.parent.mkdir(parents=True, exist_ok=True)
@@ -259,7 +257,10 @@ def main() -> int:
         print(f"ImportError: {exc}", file=sys.stderr)
         return 1
     except Exception as exc:  # noqa: BLE001 - surface build failures to CLI
-        print(f"Scene build failed: {exc}", file=sys.stderr)
+        import traceback
+
+        print(f'Scene build failed: {exc}', file=sys.stderr)
+        traceback.print_exc()
         return 1
     return 0
 

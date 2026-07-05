@@ -7,3 +7,7 @@ log/
 
 # Generated robot assets (copied meshes + Isaac-ready URDF)
 assets/robots/
+
+# Host Isaac Sim iteration logs (see scripts/host/)
+assets/logs/isaac_host/*.log
+assets/logs/isaac_host/latest*.log

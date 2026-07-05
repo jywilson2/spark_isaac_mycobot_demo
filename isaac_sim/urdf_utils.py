@@ -5,6 +5,12 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
+# Elephant Robotics COLLADA exports use GUID material IDs that Isaac Sim 6.x
+# cannot turn into USD prim names (import fails with getPrimNames(None, ...)).
+_UUID_MATERIAL_ID = 'a0000000-0000-0000-0000-000000000000'
+_UUID_MATERIAL_SYMBOL = f'material-{_UUID_MATERIAL_ID}'
+_UUID_EFFECT_ID = f'fx-{_UUID_MATERIAL_ID}'
+
 PACKAGE_URI_PATTERN = re.compile(
     r'package://mycobot_description/urdf/mycobot_280_m5/([^"\']+)'
 )
@@ -17,6 +23,19 @@ def resolve_mycobot_280_m5_package_uris(urdf_text: str) -> str:
         return match.group(1)
 
     return PACKAGE_URI_PATTERN.sub(_replace, urdf_text)
+
+
+def replace_g_base_mesh_with_box(urdf_text: str) -> str:
+    """Swap G_base.dae for a box primitive.
+
+    Isaac Sim 6.x fails to import G_base.dae (COLLADA material IDs produce
+    ``None`` entries in the USD material cache). The arm links import fine.
+    """
+
+    return urdf_text.replace(
+        '<mesh filename="G_base.dae"/>',
+        '<box size="0.12 0.12 0.06"/>',
+    )
 
 
 def write_isaac_ready_urdf(
@@ -36,6 +55,7 @@ def write_isaac_ready_urdf(
 
     urdf_text = source_urdf.read_text(encoding="utf-8")
     prepared = resolve_mycobot_280_m5_package_uris(urdf_text)
+    prepared = replace_g_base_mesh_with_box(prepared)
 
     output_urdf.parent.mkdir(parents=True, exist_ok=True)
     output_urdf.write_text(prepared, encoding="utf-8")
@@ -54,6 +74,56 @@ def default_upstream_urdf(repo_root: Path) -> Path:
         / "mycobot_280_m5"
         / "mycobot_280_m5.urdf"
     )
+
+
+def _safe_material_basename(dae_path: Path) -> str:
+    stem = re.sub(r'[^A-Za-z0-9_]+', '_', dae_path.stem)
+    return stem or 'mesh'
+
+
+def sanitize_collada_materials(dae_path: Path) -> bool:
+    """Rewrite GUID-style COLLADA material IDs to Isaac Sim-safe names.
+
+    Returns True when the file was modified.
+    """
+
+    if not dae_path.is_file() or dae_path.suffix.lower() != '.dae':
+        return False
+
+    text = dae_path.read_text(encoding='utf-8')
+    if _UUID_MATERIAL_ID not in text:
+        return False
+
+    safe_name = f'material_{_safe_material_basename(dae_path)}'
+    safe_effect = f'fx_{safe_name}'
+
+    replacements = (
+        (_UUID_EFFECT_ID, safe_effect),
+        (_UUID_MATERIAL_SYMBOL, safe_name),
+        (_UUID_MATERIAL_ID, safe_name),
+    )
+    updated = text
+    for old, new in replacements:
+        updated = updated.replace(old, new)
+
+    if updated == text:
+        return False
+
+    dae_path.write_text(updated, encoding='utf-8')
+    return True
+
+
+def sanitize_collada_materials_in_dir(mesh_dir: Path) -> list[Path]:
+    """Sanitize every .dae file under *mesh_dir* that uses GUID material IDs."""
+
+    changed: list[Path] = []
+    if not mesh_dir.is_dir():
+        return changed
+
+    for dae_path in sorted(mesh_dir.glob('*.dae')):
+        if sanitize_collada_materials(dae_path):
+            changed.append(dae_path)
+    return changed
 
 
 def default_prepared_urdf(repo_root: Path) -> Path:
