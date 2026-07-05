@@ -7,6 +7,7 @@ REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 
 export ROS_DOMAIN_ID="${ROS_DOMAIN_ID:-42}"
 export FASTDDS_BUILTIN_TRANSPORTS="${FASTDDS_BUILTIN_TRANSPORTS:-UDPv4}"
+export PYTHONPATH="${REPO_ROOT}${PYTHONPATH:+:${PYTHONPATH}}"
 
 if [[ -z "${ISAACSIM_PATH:-}" ]]; then
   echo "Set ISAACSIM_PATH to your Isaac Sim install directory." >&2
@@ -16,6 +17,13 @@ fi
 PYTHON_SH="${ISAACSIM_PATH}/python.sh"
 if [[ ! -x "${PYTHON_SH}" ]]; then
   echo "Isaac Sim python launcher not found: ${PYTHON_SH}" >&2
+  exit 1
+fi
+
+if ! git -C "${REPO_ROOT}" submodule update --init --recursive third_party/mycobot_ros2 2>&1; then
+  echo >&2
+  echo "If git reported 'dubious ownership', run once on the host:" >&2
+  echo "  git config --global --add safe.directory ${REPO_ROOT}" >&2
   exit 1
 fi
 

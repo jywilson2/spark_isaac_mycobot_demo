@@ -6,7 +6,13 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 
 cd "${REPO_ROOT}"
-git submodule update --init --recursive third_party/mycobot_ros2
+
+if ! git submodule update --init --recursive third_party/mycobot_ros2 2>&1; then
+  echo >&2
+  echo "If git reported 'dubious ownership', run once on the host:" >&2
+  echo "  git config --global --add safe.directory ${REPO_ROOT}" >&2
+  exit 1
+fi
 
 URDF="${REPO_ROOT}/third_party/mycobot_ros2/mycobot_description/urdf/mycobot_280_m5/mycobot_280_m5.urdf"
 if [[ ! -f "${URDF}" ]]; then
@@ -27,6 +33,7 @@ fi
 
 export ROS_DOMAIN_ID="${ROS_DOMAIN_ID:-42}"
 export FASTDDS_BUILTIN_TRANSPORTS="${FASTDDS_BUILTIN_TRANSPORTS:-UDPv4}"
+export PYTHONPATH="${REPO_ROOT}${PYTHONPATH:+:${PYTHONPATH}}"
 
 exec "${PYTHON_SH}" \
   "${REPO_ROOT}/isaac_sim/build_mycobot_limo_cobot_scene.py" \

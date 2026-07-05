@@ -20,6 +20,9 @@ import sys
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+
 DEFAULT_SCENE_USD = REPO_ROOT / 'assets' / 'scenes' / 'mycobot_280_m5_limo_cobot.usd'
 
 
@@ -95,11 +98,20 @@ def main() -> int:
     try:
         run_live_sim(args)
     except ImportError as exc:
-        print(
-            'Isaac Sim Python modules are unavailable.\n'
-            'Run with ${ISAACSIM_PATH}/python.sh on the Isaac Sim host.',
-            file=sys.stderr,
-        )
+        missing = str(exc)
+        if missing.startswith("No module named 'isaac_sim"):
+            print(
+                'Could not import this repository\'s isaac_sim package.\n'
+                f'Ensure the repo root is on PYTHONPATH (expected: {REPO_ROOT}).\n'
+                'Use ./scripts/run_live_sim.sh or export PYTHONPATH before running.',
+                file=sys.stderr,
+            )
+        else:
+            print(
+                'Isaac Sim Python modules are unavailable.\n'
+                'Run with ${ISAACSIM_PATH}/python.sh on the Isaac Sim host.',
+                file=sys.stderr,
+            )
         print(f'ImportError: {exc}', file=sys.stderr)
         return 1
     except Exception as exc:  # noqa: BLE001
