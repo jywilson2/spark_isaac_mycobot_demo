@@ -1,0 +1,27 @@
+services:
+  isaac-ros:
+    # Populated by `isaac-ros activate` / run_dev.py as cached_isaac_run_dev_image_local:latest
+    image: ${ISAAC_ROS_DEV_IMAGE:-cached_isaac_run_dev_image_local:latest}
+    privileged: true
+    network_mode: host
+    ipc: host
+    gpus: all
+    entrypoint: ["/usr/local/bin/scripts/workspace-entrypoint.sh"]
+    command: ["sleep", "infinity"]
+    working_dir: /workspaces/isaac_ros-dev
+    volumes:
+      - ../..:/workspaces/isaac_ros-dev:cached
+      - /tmp/.X11-unix:/tmp/.X11-unix
+      - ${HOME}/.Xauthority:/home/admin/.Xauthority
+      - ${HOME}/.ssh:/home/admin/.ssh:ro
+      - ${HOME}/.gitconfig:/home/admin/.gitconfig:ro
+      - /etc/localtime:/etc/localtime:ro
+    environment:
+      ISAAC_ROS_WS: /workspaces/isaac_ros-dev
+      HOST_USER_UID: ${HOST_USER_UID:-1000}
+      HOST_USER_GID: ${HOST_USER_GID:-1000}
+      USER: ${USER:-admin}
+      DISPLAY: ${DISPLAY}
+      NVIDIA_VISIBLE_DEVICES: all
+      NVIDIA_DRIVER_CAPABILITIES: all
+      ROS_DOMAIN_ID: ${ROS_DOMAIN_ID:-42}

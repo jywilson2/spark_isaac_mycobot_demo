@@ -8,13 +8,118 @@ Automated pipeline for simulating the Elephant Robotics MyCobot 280 inside NVIDI
 |------|---------|
 | `spark_verify_pkg/` | ROS 2 verification package with mock and live ecosystem nodes and automated tests |
 | `isaac_sim/` | Isaac Sim scene builder, ROS 2 bridge config, and host-side live sim runner |
-| `scripts/` | Asset fetch, scene build, live sim launch, and live test helpers |
+| `scripts/` | Asset fetch, scene build, live sim launch, live test helpers, and repo permission repair |
+| `.devcontainer/` | Cursor/VS Code dev container config (runs as non-root `admin` user) |
+| `.vscode/` | Editor settings (integrated terminal drops to `admin` via `gosu`) |
 | `spec.md` | Full project specification and incremental backlog |
 | `REFERENCES.md` | Curated links: MyCobot 280 background, ROS 2 / Isaac / RL / edge-deployment reference material |
 | `commands/` | Agent command playbooks (`initial_project_generation*.md`, `test_live.md`) |
 | `initial_project_generation.md` | Phase 1 generation instructions |
 | `initial_project_generation_phase2.md` | Phase 2 generation instructions |
 | `initial_project_generation_phase_remaining.md` | Phase 3–4 generation instructions |
+
+## Isaac ROS Dev Container (Non-Root User)
+
+This repository is developed inside an **Isaac ROS CLI** Docker container while **Isaac Sim runs on the host**. The workspace directory is bind-mounted from the host, so files created as **root** inside the container become unreadable to your host user (`git fetch`, `git pull`, and editor saves fail with *Permission denied*).
+
+Isaac ROS is designed to run as a non-root user (`admin`, uid/gid matching your host user). Cursor and some attach workflows may still connect as **root** unless configured. This repo ships dev-container settings so Cursor opens the environment as `admin` instead.
+
+### Prerequisites (host)
+
+- Ubuntu 24.04 with NVIDIA GPU drivers (DGX Spark or compatible)
+- [Isaac ROS CLI](https://nvidia-isaac-ros.github.io/getting_started/index.html) installed on the host
+- Docker configured for your user (`sudo usermod -aG docker $USER`, then log out/in)
+- Git LFS installed (`sudo apt install git-lfs && git lfs install`)
+
+### Step 1 — Create the Isaac ROS workspace on the host
+
+Pick a workspace path on the host (this guide uses `~/workspaces/isaac_ros-dev`):
+
+```bash
+mkdir -p ~/workspaces/isaac_ros-dev/src
+cd ~/workspaces/isaac_ros-dev/src
+git clone git@github.com:jywilson2/spark_isaac_mycobot_demo.git
+cd spark_isaac_mycobot_demo
+git checkout wip_live_testing   # or your working branch
+git submodule update --init --recursive
+```
+
+Set `ISAAC_ROS_WS` (or `ISAAC_DIR`) to your workspace root and add it to `~/.bashrc`:
+
+```bash
+export ISAAC_ROS_WS="$HOME/workspaces/isaac_ros-dev"
+echo 'export ISAAC_ROS_WS="$HOME/workspaces/isaac_ros-dev"' >> ~/.bashrc
+```
+
+The Isaac ROS CLI mounts `${ISAAC_ROS_WS}` into the container at `/workspaces/isaac_ros-dev`.
+
+### Step 2 — Start the Isaac ROS container (host)
+
+From the host, activate the dev environment once so the cached Docker image is available:
+
+```bash
+isaac-ros activate
+```
+
+This runs NVIDIA's `run_dev.py`, which:
+
+- Passes `HOST_USER_UID` / `HOST_USER_GID` from your host user into the container
+- Runs `/usr/local/bin/scripts/workspace-entrypoint.sh`, which maps the `admin` user to your host uid/gid
+- Drops to `admin` for interactive shells started via `isaac-ros activate`
+
+You can exit that shell after the container is running; the container stays up for Cursor.
+
+### Step 3 — Open in Cursor as `admin` (not root)
+
+**Use Dev Containers: Reopen in Container** on the `spark_isaac_mycobot_demo` folder. This repo's `.devcontainer/devcontainer.json` sets `"remoteUser": "admin"` and reuses the Isaac ROS cached image (`cached_isaac_run_dev_image_local:latest` by default).
+
+Do **not** use **Attach to Running Container** for day-to-day work — that path often ignores `remoteUser` and connects as root, which recreates the ownership problem.
+
+Verify in a new Cursor terminal:
+
+```bash
+whoami    # admin
+id        # uid=1000 (matches your host user)
+git status
+```
+
+If you must attach to an already-running container temporarily, new integrated terminals still drop to `admin` via the `gosu` profile in `.vscode/settings.json` — but reconnecting with **Reopen in Container** is the reliable fix.
+
+### Step 4 — Repair root-owned files (one-time or after mistakes)
+
+If git or the host reports *Permission denied* on `.git/` after editing as root, run on the **host**:
+
+```bash
+cd ~/workspaces/isaac_ros-dev/src/spark_isaac_mycobot_demo
+./scripts/fix_repo_permissions.sh
+```
+
+Or from inside the container as root:
+
+```bash
+sudo ./scripts/fix_repo_permissions.sh
+```
+
+The script `chown`s the repo (including submodule `.git/modules` metadata) to `HOST_USER_UID`/`HOST_USER_GID` when set, or your current uid/gid otherwise, and removes stale git lock files.
+
+### Dev container files in this repo
+
+| File | Purpose |
+|------|---------|
+| `.devcontainer/devcontainer.json` | `remoteUser: admin`, workspace mount, post-start git safe-directory |
+| `.devcontainer/docker-compose.yml` | GPU, host network, Isaac ROS entrypoint, workspace bind-mount |
+| `.vscode/settings.json` | Terminal profile: `gosu admin /bin/bash -l` |
+| `scripts/fix_repo_permissions.sh` | One-time ownership repair after root edits |
+
+### Optional — override the Docker image name
+
+If your Isaac ROS image tag differs from the default cache, set this on the host before **Reopen in Container**:
+
+```bash
+export ISAAC_ROS_DEV_IMAGE="$(docker images --format '{{.Repository}}:{{.Tag}}' | grep isaac | head -1)"
+```
+
+Then rebuild/reopen the dev container from Cursor.
 
 ## Completed Phases
 
@@ -187,7 +292,7 @@ This workflow follows the same host ↔ Docker networking pattern as [`spark_isa
 
 ### Prerequisites
 
-- **Isaac ROS CLI** dev container (Cursor terminal) on DGX Spark or compatible platform
+- **Isaac ROS CLI** dev container opened as **`admin`** (see [Isaac ROS Dev Container](#isaac-ros-dev-container-non-root-user)) on DGX Spark or compatible platform
 - **Isaac Sim 5.x / 6.x** on the **host** (not inside Docker)
 - Matching **`ROS_DOMAIN_ID`** on host and in Docker (this guide uses `42`)
 - **`FASTDDS_BUILTIN_TRANSPORTS=UDPv4`** on host and in Docker (required for Isaac Sim ↔ container communication)

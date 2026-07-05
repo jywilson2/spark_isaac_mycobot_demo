@@ -1,0 +1,16 @@
+{
+  "name": "Isaac ROS Dev (MyCobot demo)",
+  "dockerComposeFile": "docker-compose.yml",
+  "service": "isaac-ros",
+  "remoteUser": "admin",
+  "updateRemoteUserUID": true,
+  "workspaceFolder": "/workspaces/isaac_ros-dev",
+  "postStartCommand": "git config --global --add safe.directory /workspaces/isaac_ros-dev/src/spark_isaac_mycobot_demo || true",
+  "customizations": {
+    "vscode": {
+      "settings": {
+        "terminal.integrated.defaultProfile.linux": "Isaac ROS admin"
+      }
+    }
+  }
+}

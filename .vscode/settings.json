@@ -1,0 +1,9 @@
+{
+  "terminal.integrated.defaultProfile.linux": "Isaac ROS admin",
+  "terminal.integrated.profiles.linux": {
+    "Isaac ROS admin": {
+      "path": "gosu",
+      "args": ["admin", "/bin/bash", "-l"]
+    }
+  }
+}
