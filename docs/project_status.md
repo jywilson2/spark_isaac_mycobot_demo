@@ -1,6 +1,6 @@
 # Project Status — Return Briefing
 
-Last updated: **2026-07-05** (branch `wip_live_testing`)
+Last updated: **2026-07-06** (branch `wip_live_testing`)
 
 This document summarizes **where the project stands** so you can resume after a long break without re-discovering context. For operational commands, see [README.md](../README.md) and [isaac_sim_host_scripts.md](isaac_sim_host_scripts.md).
 
@@ -11,148 +11,85 @@ Read these in order if you are joining for the first time:
 | Order | Document | Why read it |
 |-------|----------|-------------|
 | 1 | [README.md](../README.md) | **Main entry point** — repo layout, DGX Spark + Cursor daily workflow, build/test commands, Isaac Sim live steps (Phases 1–2), troubleshooting |
-| 2 | [spec.md](../spec.md) | **Full project specification** — goals, phase backlog, acceptance criteria, hardware targets (MyCobot 280, RPi + AI Hat) |
+| 2 | [spec.md](../spec.md) | **Full project specification** — goals, phase backlog, acceptance criteria, **Isaac Lab requirement** |
 | 3 | [docs/isaac_sim_host_scripts.md](isaac_sim_host_scripts.md) | **Host-only Isaac Sim scripts** — URDF probe, scene build iteration, environment detection, log locations |
-| 4 | [commands/test_live.md](../commands/test_live.md) | **Live verification playbook** — prerequisite gate, Phase 1/2 live acceptance sequence, agent prompts (do not use mock launch files for live sign-off) |
-
-### Reference and background
-
-| Document | Purpose |
-|----------|---------|
-| [REFERENCES.md](../REFERENCES.md) | Curated links: MyCobot 280, ROS 2 Jazzy, Isaac Sim/Lab, RL, edge deployment |
-| [LICENSE.md](../LICENSE.md) | Apache 2.0 license |
-| [.cursorrules](../.cursorrules) | AI/agent coding constraints (ROS 2 Jazzy, TDD, Isaac Sim API patterns) |
-
-### Phase generation playbooks (`commands/`)
-
-These were used to scaffold the repo incrementally. Useful for understanding *why* a package or node exists, not required for day-to-day operation:
-
-| Document | Scope |
-|----------|-------|
-| [commands/initial_project_generation.md](../commands/initial_project_generation.md) | Phase 1 — URDF, ROS 2 bridge, mock perception |
-| [commands/initial_project_generation_phase2.md](../commands/initial_project_generation_phase2.md) | Phase 2 — MDP, rewards, vision, safety |
-| [commands/initial_project_generation_phase_remaining.md](../commands/initial_project_generation_phase_remaining.md) | Phases 3–4 — ONNX export, pymycobot, RPi HIL |
-
-### External assets
-
-| Location | Purpose |
-|----------|---------|
-| [third_party/mycobot_ros2/](../third_party/mycobot_ros2/) | Upstream Elephant Robotics URDF/meshes (git submodule, branch `humble`) |
-| [third_party/mycobot_ros2/README.md](../third_party/mycobot_ros2/README.md) | Upstream package documentation |
-
-### Where this doc fits
-
-- **First visit** → README → spec → host scripts doc → test_live playbook (table above).
-- **Returning after a break** → stay on this page (sections below), then run the [resume checklist](#suggested-resume-checklist).
-- **Debugging scene/URDF build** → [isaac_sim_host_scripts.md](isaac_sim_host_scripts.md) iteration workflow.
+| 4 | [commands/test_live.md](../commands/test_live.md) | **Live verification playbook** — prerequisite gate, Phase 1/2 live acceptance sequence |
 
 ## One-paragraph summary
 
-Mock Phases 1–4 are complete and green via `colcon test`. **Live Phase 1 and 2** ROS stacks and integration tests exist. **Isaac Sim scene build now works on the host** (Isaac Sim 6.x, pre-built install at `~/isaacsim`). The robot base uses a box placeholder instead of `G_base.dae` due to an importer bug. **Isaac Lab PPO training against the live sim is not yet scripted** — the MDP facade exists and live topic plumbing is ready, but the training launcher and end-to-end live training verification remain the next milestone.
+Mock Phases 1–4 and container tests are green (`colcon test`, 27/27). **Isaac Lab is required and installed** on the host (`~/IsaacLab`, `develop` branch, pinned via `isaac_lab/versions.env`). **Native Isaac Lab PPO training** runs on the Isaac Sim host via `scripts/host/run_isaac_lab_training.sh train`. The MyCobot DirectRLEnv (`Spark-MyCobot-PickPlace-Direct-v0`) uses the 14-dim MDP contract shared with the ROS verification stack. **PPO training verified** on host (8 iterations, 2 envs, mean reward ≈ 74–123, checkpoint written).
 
 ## Architecture reminder
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│  HOST (DGX Spark)                                           │
-│  Isaac Sim: scene USD, articulation, camera, /clock bridge  │
-│  Future: Isaac Lab trainer (Terminal C)                     │
+│  HOST (DGX Spark) — REQUIRED for Phase 2 training           │
+│  Isaac Sim 6.x (~/isaacsim) + Isaac Lab (~/IsaacLab)        │
+│  PPO: ./scripts/host/run_isaac_lab_training.sh train        │
 └──────────────────────────┬──────────────────────────────────┘
-                           │ ROS 2 (ROS_DOMAIN_ID=42, UDPv4)
+                           │ ROS 2 (optional live verification)
 ┌──────────────────────────▼──────────────────────────────────┐
-│  Isaac ROS container (Cursor, user admin uid 1000)            │
-│  phase1/2_live_ecosystem.launch.py, live tests, colcon      │
+│  Isaac ROS container (Cursor)                                 │
+│  phase1/2 live stacks, colcon test, ROS-bridge smoke tests    │
 └─────────────────────────────────────────────────────────────┘
 ```
-
-**Daily startup:** host `isaac-ros activate` → open Cursor (auto-attach) → `source scripts/source_container_env.sh`.
 
 ## Completed ✅
 
 | Area | Status | Notes |
 |------|--------|-------|
-| Mock Phase 1–4 | ✅ | `colcon test --packages-select spark_verify_pkg` |
-| `mycobot_ros2` submodule | ✅ | `third_party/mycobot_ros2`, branch `humble` |
-| URDF → USD import (Isaac Sim 6) | ✅ | `URDFImporter` API; see host iteration scripts |
-| Scene USD | ✅ | `assets/scenes/mycobot_280_m5_limo_cobot.usd` |
-| Host iteration toolkit | ✅ | `scripts/host/*` with logs in `assets/logs/isaac_host/` |
-| Live Phase 1 stack | ✅ | `phase1_live_ecosystem.launch.py`, live tests (auto-skip without sim) |
-| Live Phase 2 stack | ✅ | Vision, RL observation, `live_mdp_reward_monitor` |
-| MDP facade | ✅ | `IsaacLabMyCobotPickPlaceEnv` in `isaac_lab_mdp_env.py` |
-| Live sim runner | ✅ | `./scripts/run_live_sim.sh` |
+| Mock Phase 1–4 | ✅ | `colcon test --packages-select spark_verify_pkg` (27 tests) |
+| Isaac Sim scene build | ✅ | `assets/scenes/mycobot_280_m5_limo_cobot.usd` |
+| **Isaac Lab install script** | ✅ | `scripts/host/install_isaac_lab.sh` |
+| **Isaac Lab verify script** | ✅ | `scripts/host/verify_isaac_lab.sh` |
+| **Isaac Lab DirectRLEnv** | ✅ | `isaac_lab/mycobot_pick_place_env.py` |
+| **Isaac Lab PPO trainer** | ✅ | `isaac_lab/train_ppo.py` + `rsl_rl_ppo_cfg.py` |
+| **Isaac Lab unit tests** | ✅ | `isaac_lab/test/test_mdp_contract.py`, `test_detect_isaac_lab.py` |
+| **Host integration tests** | ✅ | `test_isaac_lab_integration.py` (requires host install) |
+| ROS live Phase 1/2 | ✅ | Live tests auto-skip without sim |
+| ROS-bridge PPO (legacy smoke) | ✅ | `live_ppo_trainer` — not primary training path |
 
-## In progress / next up 🔜
+## Isaac Lab workflow (required)
 
-### 1. End-to-end live verification (before training)
+| Step | Command |
+|------|---------|
+| Install (once) | `./scripts/host/install_isaac_lab.sh` |
+| Verify | `./scripts/host/verify_isaac_lab.sh` |
+| Train PPO | `./scripts/host/run_isaac_lab_training.sh train --headless --max-iterations 8 --num-envs 2` |
+| Check install | `./scripts/host/run_isaac_lab_training.sh check` |
 
-Run once after clone or major changes:
+**Pinning:** `isaac_lab/versions.env` — Isaac Sim 6.x + Isaac Lab `develop` branch + RSL-RL.
 
-| Step | Where | Command |
-|------|-------|---------|
-| Scene build | Host | `./scripts/host/iter_build_isaac_scene.sh` |
-| Live sim | Host | `./scripts/run_live_sim.sh` |
-| Bridge check | Container | `ros2 topic hz /clock` |
-| Phase 2 stack | Container | `ros2 launch spark_verify_pkg phase2_live_ecosystem.launch.py` |
-| Live tests | Container | `./scripts/run_live_tests.sh` |
+**Checkpoints:** `assets/checkpoints/isaac_lab_ppo/latest_policy` + `training_summary.json` (gitignored).
 
-**Gate:** live tests must pass before starting Isaac Lab training (`README.md` Step 7).
+## Execution log (2026-07-06)
 
-### 2. Isaac Lab training (primary next feature)
+| Run | Environment | Command | Result |
+|-----|-------------|---------|--------|
+| Container unit tests | Container | `colcon test --packages-select spark_verify_pkg` | **27/27 passed** |
+| Isaac Lab install | Host (jywilson) | `./scripts/host/install_isaac_lab.sh` | **Passed** — cloned `~/IsaacLab` (`develop`), linked `_isaac_sim` → `~/isaacsim`, installed `rsl_rl` |
+| Isaac Lab verify | Host | `./scripts/host/install_isaac_lab.sh --verify-only` | **Passed** — imports + headless env smoke (4 steps) |
+| **Isaac Lab PPO training** | Host | `run_isaac_lab_training.sh train --headless --max-iterations 8 --num-envs 2` | **Passed** — 8 iterations, 384 steps, mean reward ≈ 74.43, checkpoint at `assets/checkpoints/isaac_lab_ppo/latest_policy` |
+| Isaac Lab branch note | Host | `main` branch | **Failed** — incompatible with Isaac Sim 6.0 (`omni.physics.tensors.impl` missing); use `develop` |
 
-**Not implemented yet.** Planned layout:
+**Training summary sample:**
 
-| Terminal | Role |
-|----------|------|
-| A (host) | `./scripts/run_live_sim.sh` |
-| B (container) | `phase2_live_ecosystem.launch.py` |
-| C (host) | Isaac Lab PPO trainer — **to be added** |
+```json
+{"task": "Spark-MyCobot-PickPlace-Direct-v0", "num_envs": 2, "max_iterations": 8,
+ "checkpoint": ".../assets/checkpoints/isaac_lab_ppo/latest_policy",
+ "log_dir": ".../assets/checkpoints/isaac_lab_ppo/logs"}
+```
 
-**Existing hooks:**
+## Suggested resume checklist
 
-- `spark_verify_pkg/spark_verify_nodes/isaac_lab_mdp_env.py` — `IsaacLabMyCobotPickPlaceEnv` reads live ROS topics (`/mycobot/rl/observation`, joint states, etc.)
-- `live_mdp_reward_monitor.py` — publishes `/mycobot/rl/live_reward` and safety penalty for smoke tests
-- Reward / safety logic in `reward_function.py`, `safety_boundary_evaluator`
-
-**Still needed:**
-
-- [ ] Isaac Lab install path documented and version-pinned to host Isaac Sim 6.0
-- [ ] Training script or launch config (PPO) wired to `IsaacLabMyCobotPickPlaceEnv` or native Isaac Lab env wrapping the same observation space
-- [ ] Checkpoint export path toward Phase 3 ONNX pipeline
-- [ ] Live test asserting training loop can step at least N episodes with sim playing
-
-### 3. Known limitations (acceptable for now)
-
-| Item | Workaround |
-|------|------------|
-| `G_base.dae` broken in Isaac Sim 6 importer | Box placeholder in prepared URDF (`0.12 × 0.12 × 0.06` m) |
-| Isaac Sim 6 robot USD is `.usda` + payloads dir | Scene builder references imported robot correctly |
-| Host scripts fail inside container | Run on native host terminal; see `scripts/host/` |
-| Isaac Lab training not scripted | Operator-driven; see section 2 above |
-
-## File locations (quick lookup)
-
-| Artifact | Path |
-|----------|------|
-| Scene USD | `assets/scenes/mycobot_280_m5_limo_cobot.usd` |
-| Robot URDF + meshes | `assets/robots/mycobot_280_m5_limo_cobot/` |
-| Host build logs | `assets/logs/isaac_host/latest.log` |
-| Live test playbook | [commands/test_live.md](../commands/test_live.md) |
-| Full spec / backlog | [spec.md](../spec.md) |
-| Host script guide | [docs/isaac_sim_host_scripts.md](isaac_sim_host_scripts.md) |
-| Main README | [README.md](../README.md) |
+1. Host: `isaac-ros activate` → Cursor → `source scripts/source_container_env.sh`
+2. Host: `./scripts/host/run_isaac_lab_training.sh check` (Isaac Lab must be installed)
+3. If Isaac Lab missing: `./scripts/host/install_isaac_lab.sh`
+4. If robot USD missing: `./scripts/host/iter_build_isaac_scene.sh`
+5. Train: `./scripts/host/run_isaac_lab_training.sh train --headless --max-iterations 20`
+6. Optional ROS live gate: `./scripts/run_live_sim.sh` + `./scripts/run_live_tests.sh`
 
 ## Branch and remote
 
 - **Working branch:** `wip_live_testing`
 - **Remote:** `https://github.com/jywilson2/spark_isaac_mycobot_demo.git`
-
-## Suggested resume checklist
-
-1. Host: `isaac-ros activate` → Cursor open → `whoami` = `admin`
-2. Container: `source scripts/source_container_env.sh`
-3. Host: `./scripts/host/check_prereqs.sh`
-4. If scene missing or URDF changed: `./scripts/host/iter_build_isaac_scene.sh`
-5. Host: `./scripts/run_live_sim.sh` (keep running)
-6. Container: `ros2 topic hz /clock`
-7. Container: `./scripts/run_live_tests.sh`
-8. If live tests green → start Isaac Lab training work (section 2)

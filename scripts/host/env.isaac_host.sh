@@ -86,10 +86,14 @@ spark_host_new_log() {
   local stamp
   stamp="$(date +%Y%m%d_%H%M%S)"
   spark_host_apply_env >/dev/null 2>&1 || true
-  mkdir -p "${SPARK_HOST_LOG_DIR}"
-  local log_path="${SPARK_HOST_LOG_DIR}/${label}_${stamp}.log"
-  ln -sfn "$(basename "${log_path}")" "${SPARK_HOST_LOG_DIR}/latest_${label}.log"
-  ln -sfn "$(basename "${log_path}")" "${SPARK_HOST_LOG_DIR}/latest.log"
+  local log_dir="${SPARK_HOST_LOG_DIR}"
+  if ! mkdir -p "${log_dir}" 2>/dev/null; then
+    log_dir="${TMPDIR:-/tmp}/spark_isaac_host_logs"
+    mkdir -p "${log_dir}"
+  fi
+  local log_path="${log_dir}/${label}_${stamp}.log"
+  ln -sfn "$(basename "${log_path}")" "${log_dir}/latest_${label}.log" 2>/dev/null || true
+  ln -sfn "$(basename "${log_path}")" "${log_dir}/latest.log" 2>/dev/null || true
   printf '%s' "${log_path}"
 }
 

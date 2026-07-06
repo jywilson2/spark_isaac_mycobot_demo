@@ -117,7 +117,7 @@ source install/setup.bash
 |----------|---------|------|
 | **A** | Host | `./scripts/run_live_sim.sh` — MyCobot scene + ROS 2 bridge |
 | **B** | Cursor (container) | `ros2 topic hz /clock`, live launch files, integration tests |
-| **C** | Host (future) | Isaac Lab PPO training (not yet scripted in this repo) |
+| **C** | Host | `./scripts/host/run_isaac_lab_training.sh train --headless` — **Isaac Lab PPO (required)** |
 
 Isaac Sim always runs on the **host**. ROS nodes and tests run in the **container** (Cursor).
 
@@ -537,19 +537,28 @@ ros2 launch spark_verify_pkg phase1_mock_ecosystem.launch.py
 ros2 launch spark_verify_pkg phase2_mock_ecosystem.launch.py
 ```
 
-### Step 9 — Isaac Lab (Live Phase 2 training)
+### Step 9 — Isaac Lab PPO training (required)
 
-Isaac Lab policy training runs on the **host** alongside the live sim. **Training is not yet scripted in this repo** — see [docs/project_status.md](docs/project_status.md) for the resume checklist and remaining work.
+Phase 2 policy training **requires Isaac Lab** on the Isaac Sim host. Install once, then train:
+
+```bash
+# Host terminal
+./scripts/host/install_isaac_lab.sh
+./scripts/host/verify_isaac_lab.sh
+./scripts/host/run_isaac_lab_training.sh train --headless --max-iterations 20 --num-envs 4
+```
 
 Prerequisites:
 
-1. Steps 1–7 complete (sim playing, Phase 2 stack running, live tests green)
-2. **Isaac Lab** installed on the host, version-matched to your Isaac Sim build
-3. Terminal A: `./scripts/run_live_sim.sh` (host)
-4. Terminal B: `phase2_live_ecosystem.launch.py` (Cursor)
-5. Terminal C: Isaac Lab trainer (host — **to be added**)
+1. Isaac Sim at `~/isaacsim` (see Step 2 / host scripts)
+2. Robot USD built: `./scripts/host/iter_build_isaac_scene.sh`
+3. Isaac Lab cloned to `~/IsaacLab` (`develop` branch — see `isaac_lab/versions.env`)
 
-The live MDP facade is `IsaacLabMyCobotPickPlaceEnv` (`isaac_lab_mdp_env.py`), wired to live ROS topics via the Phase 2 stack.
+Checkpoints: `assets/checkpoints/isaac_lab_ppo/latest_policy` + `training_summary.json`.
+
+The container `./scripts/run_live_training.sh` redirects to the host Isaac Lab trainer (training does not run inside Docker).
+
+Optional ROS live verification (Steps 5–7) remains recommended before deploying trained policies to the live sim bridge.
 
 ### Quick reference checklist
 
@@ -563,7 +572,7 @@ The live MDP facade is `IsaacLabMyCobotPickPlaceEnv` (`isaac_lab_mdp_env.py`), w
 | 4 | Cursor | `ros2 topic hz /clock` → non-zero rate |
 | 5 | Cursor | `ros2 launch spark_verify_pkg phase2_live_ecosystem.launch.py` |
 | 6 | Cursor | `./scripts/run_live_tests.sh` — must pass before training |
-| 7 | Host | Isaac Lab training (future — see Step 9) |
+| 7 | Host | `./scripts/host/run_isaac_lab_training.sh train --headless` (Step 9) |
 
 ### Isaac Sim troubleshooting
 
@@ -608,7 +617,7 @@ ros2 node list
 | Live Phase 2 Docker stack | Ready |
 | Live integration tests | Ready — auto-skip without Isaac Sim |
 | End-to-end live test gate | **Run `./scripts/run_live_tests.sh` before training** |
-| Isaac Lab training loop | **Not scripted** — facade ready; see [docs/project_status.md](docs/project_status.md) |
+| Isaac Lab training loop | **Required** — `./scripts/host/install_isaac_lab.sh` then `run_isaac_lab_training.sh train` |
 
 ## Live Integration (Phase 1–2 ready)
 
@@ -617,7 +626,7 @@ Mock verification phases validate ROS 2 contracts without Isaac Sim. **Live Phas
 Remaining work from `spec.md` and [docs/project_status.md](docs/project_status.md):
 
 - **Live verification gate:** Run `./scripts/run_live_tests.sh` with sim playing (if not done recently).
-- **Live Phase 2 training:** Script Isaac Lab PPO against `IsaacLabMyCobotPickPlaceEnv` (scene + ROS topics must be playing).
+- **Isaac Lab training:** Required on host — `./scripts/host/install_isaac_lab.sh` then `run_isaac_lab_training.sh train`.
 - **Live Phase 3:** Export real trained ONNX weights and connect to physical MyCobot via `pymycobot` serial.
 - **Live Phase 4:** Deploy to Raspberry Pi + AI Hat with live USB camera and physical MyCobot arm.
 

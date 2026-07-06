@@ -128,6 +128,7 @@ install(PROGRAMS
   scripts/mock_usb_camera_hil
   scripts/live_nitros_camera_bridge
   scripts/live_mdp_reward_monitor
+  scripts/live_ppo_trainer
   DESTINATION lib/${PROJECT_NAME})
 
 # Installs the spark_verify_nodes/ Python module into site-packages so
@@ -177,6 +178,20 @@ if(BUILD_TESTING)
   ament_add_pytest_test(test_mock_onnx_policy test/test_mock_onnx_policy.py
     APPEND_ENV PYTHONPATH=${CMAKE_CURRENT_SOURCE_DIR}
     TIMEOUT 60)
+  ament_add_pytest_test(test_ppo_policy test/test_ppo_policy.py
+    APPEND_ENV PYTHONPATH=${CMAKE_CURRENT_SOURCE_DIR}
+    TIMEOUT 60)
+  ament_add_pytest_test(test_policy_checkpoint test/test_policy_checkpoint.py
+    APPEND_ENV PYTHONPATH=${CMAKE_CURRENT_SOURCE_DIR}
+    TIMEOUT 60)
+  ament_add_pytest_test(test_isaac_lab_mdp_contract
+    ${CMAKE_CURRENT_SOURCE_DIR}/../isaac_lab/test/test_mdp_contract.py
+    APPEND_ENV PYTHONPATH=${CMAKE_CURRENT_SOURCE_DIR}/../..
+    TIMEOUT 60)
+  ament_add_pytest_test(test_isaac_lab_detect
+    ${CMAKE_CURRENT_SOURCE_DIR}/../isaac_lab/test/test_detect_isaac_lab.py
+    APPEND_ENV PYTHONPATH=${CMAKE_CURRENT_SOURCE_DIR}/../..
+    TIMEOUT 60)
 
   # Integration tests: add_launch_test runs each file under
   # launch_testing, which starts the mock ecosystem processes and executes
@@ -187,6 +202,8 @@ if(BUILD_TESTING)
   add_launch_test(test/test_phase4_hil_integration.py TIMEOUT 60)
   add_launch_test(test/test_phase1_live_integration.py TIMEOUT 120)
   add_launch_test(test/test_phase2_live_integration.py TIMEOUT 120)
+  add_launch_test(test/test_phase2_mock_training_integration.py TIMEOUT 90)
+  add_launch_test(test/test_phase2_live_training_integration.py TIMEOUT 180)
 
   ament_add_pytest_test(test_live_sim_gate test/test_live_sim_gate.py)
   ament_add_pytest_test(test_safety_boundary_evaluator_py test/test_safety_boundary_evaluator_py.py)
