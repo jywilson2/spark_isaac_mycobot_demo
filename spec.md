@@ -13,11 +13,22 @@ All source code and scripts in this repository **must** contain **verbose inline
 * Link to **authoritative external references** where helpful (Isaac Lab, RSL-RL, ROS 2 Jazzy, operational-space control, PPO).
 * Describe how MDP variables (observations, actions, rewards) **translate to physical motion** on the MyCobot arm.
 
-The default training CLI prints a **verbose motion glossary** (`--verbose`, on by default; disable with `--no-verbose`) that mirrors this tutorial intent at runtime.
+The default training CLI prints a **verbose motion glossary** (`--motion-glossary`, on by default; disable with `--no-motion-glossary`) that mirrors this tutorial intent at runtime. Isaac Lab reserves `--verbose` for kit logging.
 
 ### Strategic goal — RL for IK, efficient motion, and planning
 
-Phase 2 demonstrates that **inverse kinematics-style reach**, **time-efficient motion**, and rudimentary **motion planning** can be learned by RL **without an analytic IK solver in the policy loop**. The policy acts in **Cartesian task space** (Δx, Δy, Δz); a damped least-squares Jacobian maps task-space commands to joint targets. Phase 2b (obstacles) extends this to planning after Phase 2 reaches **99%** success.
+Phase 2 demonstrates that **inverse kinematics-style reach**, **time-efficient motion**, and rudimentary **motion planning** are **learned by the RL policy** — not delegated to analytic, numeric, or differential IK solvers. The PPO network maps observations (EE-to-target vector + joint state) to **joint position deltas**; coordinating those deltas so the flange reaches a 3D target *is* the learned IK. Phase 2b (obstacles) extends this to planning after Phase 2 reaches **99%** success.
+
+### Host vs container execution (required)
+
+| Runtime | Runs Isaac Sim / Isaac Lab? | How agents and scripts execute |
+|---------|----------------------------|--------------------------------|
+| **DGX Spark host** (native shell after `isaac-ros activate`) | **Yes** — `~/isaacsim`, `~/IsaacLab` | `./scripts/host/run_isaac_lab_training.sh train` |
+| **Isaac ROS container** (Cursor attached) | **No** — no GPU sim binaries | Scripts **auto-delegate to the host** via `nsenter` ([scripts/host/spark_host_exec.sh](scripts/host/spark_host_exec.sh)) |
+
+**Do not** assume training failed because the container lacks `python.sh`; container invocations of `run_isaac_lab_training.sh` or `./scripts/run_live_training.sh` must transparently re-exec on the host. Override host repo path with `SPARK_HOST_REPO_ROOT` or host user with `SPARK_HOST_USER` (default `admin`) when needed.
+
+Daily workflow: host runs `isaac-ros activate` → Cursor restores workspace → agents call training scripts from the container → host Isaac Sim runs PPO.
 
 ## Core Tech Stack
 
@@ -35,17 +46,19 @@ Phase 2 demonstrates that **inverse kinematics-style reach**, **time-efficient m
 
 Phase 2 trains **efficient inverse-kinematics-style arm motion**: move `joint6_flange` to a **known 3D target** in the robot base frame. **No vision. No block contact.**
 
+**Prohibited:** analytic IK, numeric IK, differential IK (`DifferentialIKController`), Jacobian pseudoinverse, or any solver that maps target pose → joint angles. The **PPO policy** must learn that mapping through joint-space actions.
+
 ### Task definition
 
 1. **Randomize target EE position** each episode within the arm reach envelope (annulus 0.12–0.28 m horizontally; Z 0.08–0.22 m).
 2. **Mark the target in simulation** with a visible **red sphere** (visual only — contact with the marker is **not** required).
 3. **Observations (11-dim motion policy):** normalized EE-to-target delta (3), `target_valid` (1), `reached` (1), joint positions (6).
-4. **Actions (3-dim Cartesian):** policy outputs Δx, Δy, Δz in the robot base frame (scaled, clipped). A **damped least-squares Jacobian** maps Cartesian deltas to joint position targets; **soft joint limits** are enforced. This is *not* analytic IK — the policy learns task-space motion; the Jacobian is only a low-level actuator interface (see [isaac_lab/cartesian_actuation.py](isaac_lab/cartesian_actuation.py)).
-5. **Reward:** **potential-based** distance reduction (policy-invariant shaping) + per-step **time penalty** (efficiency) + large **terminal bonus** inside tolerance. No perpetual proximity reward that pays without reaching.
-6. **Curriculum:** staged target sampling — near current EE → medium annulus → full workspace — advancing when rolling success exceeds stage thresholds.
-7. **Success:** EE within **25 mm** of target; episode terminates early on success.
-8. **Training stop:** rolling **reach success rate ≥ 99%** (default) or **`--max-duration-minutes`** (default **30**). Training is **duration-bounded by default**, not iteration-bounded. Use `--fixed-iterations N` only for short smoke tests.
-9. **Verbose CLI:** `--verbose` (default **on**) prints a tutorial glossary of MDP variables and how they map to arm motion; `--no-verbose` disables it.
+4. **Actions (6-dim joint space):** policy outputs **joint position deltas** (Δq, one per revolute joint), scaled and clipped; **soft joint limits** enforced. **No IK solver** (analytic, numeric, differential, or Jacobian pseudoinverse) may appear in the control loop — the policy *is* the learned IK mapping.
+5. **Reward:** **potential-based** distance reduction + per-step **time penalty** + large **terminal bonus** inside tolerance.
+6. **Curriculum:** staged target sampling — near current EE → medium annulus → full workspace.
+7. **Success:** EE within **25 mm**; early terminate on success.
+8. **Training stop:** rolling **reach success rate ≥ 99%** or **`--max-duration-minutes`** (default **30**).
+9. **Motion glossary CLI:** `--motion-glossary` (default **on**) prints MDP/motion tutorial output; `--no-motion-glossary` disables. (Isaac Lab reserves `--verbose` for kit logging.)
 
 | Mode | Default arms | Rationale |
 |------|--------------|-----------|
@@ -59,6 +72,7 @@ Phase 2 trains **efficient inverse-kinematics-style arm motion**: move `joint6_f
 | Train (GUI, 2 arms) | `./scripts/host/run_isaac_lab_training.sh train` |
 | Train (headless, 8 arms) | `./scripts/host/run_isaac_lab_training.sh train --headless` |
 | Play trained policy | `./scripts/host/run_isaac_lab_training.sh play` |
+| **Continuous GUI demo** (1 arm, until exit) | `./scripts/host/run_isaac_lab_training.sh demo` |
 | Full verify + integration train | `./scripts/host/verify_isaac_lab.sh --smoke-train` |
 
 Cameras are **off** by default for Phase 2 (not required). EE cameras activate only with `--use-red-block-vision` (Phase 6).
@@ -140,8 +154,8 @@ README and host-script docs should stay aligned with `spec.md` command paths.
 ### Phase 2: EE Reach PPO (Isaac Lab)
 
 * [x] MDP contract (`isaac_lab/mdp_core.py`) — reachable EE sampling, reach rewards
-* [x] DirectRLEnv (`isaac_lab/mycobot_reach_env.py`) — Cartesian actions, staged curriculum, red marker
-* [x] Cartesian actuation (`isaac_lab/cartesian_actuation.py`) — DLS Jacobian map
+* [x] DirectRLEnv (`isaac_lab/mycobot_reach_env.py`) — joint-space RL (learned IK), curriculum, red marker
+* [x] Host auto-delegate (`scripts/host/spark_host_exec.sh`) — container → host via `nsenter`
 * [x] PPO trainer (`isaac_lab/train_ppo.py`) — duration-bounded train, verbose CLI (default on)
 * [x] Train-until-success loop (`isaac_lab/training_success.py`)
 * [x] Unit + integration tests

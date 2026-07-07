@@ -3,13 +3,9 @@ last_prompt.md
 # The last prompt executed in the Cursor Agent window:
 
 ## BEGIN
-Add a project objective to @spec.md that all source code and scripts shouild contain verbose inline documentation to provide value as a tutorial on the related subject matter. This can include links to internal documenation and outside URL's. Think of the code as a text book on robotics software development with RL.
+Can you verify that the current training is not blocked?
 
-Yes, do as you recommend. We will work on Phase 2b after Phase 2 is successful. I believe this corresponds to items 1 through 4.
-
-Instead of limiting training to a number of iterations, limit it to a configurable duration, with a value of 30 minutes by default.
-
-Produce a verbose console output command-line option that describes the value of key variables and how they translate to motion. Make this option enabled by default.
+Also, can you produce a "demo" command-line option that visualizes the operation of the fully trained arm with the EE moving to the locaiton of a red sphere, that is random repositioned within reach of the arm after each EE reach-to-target. This wouild be used to show-off the fully trained arm in the simulator. Only a single instance of the arm should be loaded and it should continut to run until exited from the command-line.
 ## END
 
 # Old prompts:

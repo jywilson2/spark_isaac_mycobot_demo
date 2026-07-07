@@ -44,7 +44,7 @@ Mock Phases 1–4 and container tests are green (`colcon test`, 27/27). **Isaac 
 | **Isaac Lab verify script** | ✅ | `scripts/host/verify_isaac_lab.sh` |
 | **Phase 2 EE reach env** | ✅ | `mycobot_reach_env.py` — random target + red marker, 99% stop criterion |
 | **Phase 6 red-block (opt-in)** | ✅ | `isaac_lab/phase6_red_block/` + `--use-red-block-vision` |
-| **Reach training (2026-07-06)** | Partial | 800-iter headless run peaked ~12.5% reach; **99% not yet met** — reward/curriculum tuning ongoing |
+| **Reach training (2026-07-06)** | Partial | Joint-space runs peaked ~12.5%; Cartesian + DifferentialIK fix applied 2026-07-07 — **retrain on host** |
 | **Isaac Lab PPO trainer** | ✅ | `isaac_lab/train_ppo.py` + `rsl_rl_ppo_cfg.py` |
 | **Isaac Lab unit tests** | ✅ | `isaac_lab/test/test_mdp_contract.py`, `test_detect_isaac_lab.py` |
 | **Training success reporting** | ✅ | Per-iteration criteria + total execution time (`isaac_lab/training_success.py`) |
@@ -59,7 +59,7 @@ Mock Phases 1–4 and container tests are green (`colcon test`, 27/27). **Isaac 
 |------|---------|
 | Install (once) | `./scripts/host/install_isaac_lab.sh` |
 | Verify | `./scripts/host/verify_isaac_lab.sh` |
-| Train PPO | `./scripts/host/run_isaac_lab_training.sh train --max-iterations 8 --num-envs 2` (GUI default) |
+| Train PPO | `./scripts/host/run_isaac_lab_training.sh train --headless` (30 min default, 8 arms) |
 | Check install | `./scripts/host/run_isaac_lab_training.sh check` |
 
 **Pinning:** `isaac_lab/versions.env` — Isaac Sim 6.x + Isaac Lab `develop` branch + RSL-RL.

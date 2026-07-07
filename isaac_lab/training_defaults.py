@@ -38,6 +38,11 @@ INTEGRATION_TRAIN_MAX_ITERATIONS = 2
 # PPO learns in chunks; the outer loop runs until duration or task success.
 DEFAULT_TRAINING_ITERATION_CHUNK = 100
 
+# Abort when rolling reach success stalls (see TrainingSuccessCriteria).
+DEFAULT_PLATEAU_WARMUP_ITERATIONS = 40
+DEFAULT_PLATEAU_WINDOW_ITERATIONS = 120
+DEFAULT_MIN_REACH_IMPROVEMENT = 0.01
+
 
 def default_max_train_duration_s(*, minutes: float | None = None) -> float:
     """Return training time budget in seconds."""
@@ -60,14 +65,13 @@ def format_policy_demo_instructions(*, checkpoint: str | None = None) -> str:
             '=== Run trained policy (EE reach demo) ===',
             'After training, demonstrate reach-to-target in the Isaac Sim GUI:',
             '',
-            f'  ./scripts/host/run_isaac_lab_training.sh play --checkpoint {ckpt}',
+            '  ./scripts/host/run_isaac_lab_training.sh demo',
             '',
-            'Each episode randomizes a reachable EE target (red marker in sim).',
-            'The arm learns efficient joint motion to reach the 3D target.',
+            'Continuous showcase: one arm, red target sphere respawns after each reach.',
+            'Runs until you close Isaac Sim or press Ctrl+C.',
             '',
-            'Options:',
-            '  --episodes N       Number of demo episodes (default: 10)',
-            '  --checkpoint PATH  Policy directory or model_*.pt file',
+            'Finite regression play:',
+            f'  ./scripts/host/run_isaac_lab_training.sh play --checkpoint {ckpt} --episodes 10',
             '',
             'Ongoing use: re-run the play command after retraining; update --checkpoint',
             'when saving to a new directory. See README.md § Ongoing use of trained policies.',

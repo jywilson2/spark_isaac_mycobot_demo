@@ -7,6 +7,7 @@
 #   ./scripts/host/run_isaac_lab_training.sh verify
 #   ./scripts/host/run_isaac_lab_training.sh train [--headless] [--num-arms N] [--max-duration-minutes M]
 #   ./scripts/host/run_isaac_lab_training.sh play [--checkpoint PATH] [--episodes N]
+#   ./scripts/host/run_isaac_lab_training.sh demo [--checkpoint PATH]
 #
 # Visualization (Isaac Sim GUI) is the default for train/play. Pass --headless to disable the GUI.
 # Default arms: 2 with GUI, 8 headless (DGX Spark). EE cameras use --enable_cameras (auto).
@@ -14,6 +15,15 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
+
+# When Cursor runs inside the Isaac ROS container, delegate to the host Isaac Sim
+# install automatically (same pattern as URDF probe / scene build agents).
+if [[ -f /.dockerenv ]] && [[ "${SPARK_SKIP_HOST_DELEGATE:-}" != "1" ]]; then
+  # shellcheck source=spark_host_exec.sh
+  source "${SCRIPT_DIR}/spark_host_exec.sh"
+  spark_delegate_to_host "./scripts/host/run_isaac_lab_training.sh" "$@"
+  exit $?
+fi
 
 # shellcheck source=env.isaac_host.sh
 source "${SCRIPT_DIR}/env.isaac_host.sh"
@@ -172,15 +182,49 @@ case "${MODE}" in
     else
       PLAY_ARGS=(--headless --viz none --enable_cameras "${PLAY_ARGS[@]}")
     fi
-    echo "Playing trained policy (GUI default). Each episode randomizes cube spawn."
+    echo "Playing trained policy (GUI default). Each episode randomizes EE target."
     (
       cd "${ISAACLAB_PATH}"
       export TERM="${TERM:-xterm-256color}"
       ./isaaclab.sh -p "${REPO_ROOT}/isaac_lab/play_ppo.py" "${PLAY_ARGS[@]}"
     )
     ;;
+  demo)
+    spark_ensure_isaac_sim_conda_stub
+    if [[ ! -x "${ISAACLAB_PATH}/isaaclab.sh" ]]; then
+      echo "Isaac Lab required. Run: ${REPO_ROOT}/scripts/host/install_isaac_lab.sh" >&2
+      exit 1
+    fi
+    # shellcheck source=spark_host_exec.sh
+    source "${SCRIPT_DIR}/spark_host_exec.sh"
+    spark_require_gui_display "${HOME}" || exit 1
+    DEMO_ARGS=(--demo --viz kit --num-arms 1)
+    while [[ $# -gt 0 ]]; do
+      case "$1" in
+        --checkpoint|--seed|--robot-usd)
+          DEMO_ARGS+=("$1" "$2")
+          shift 2
+          ;;
+        --headless)
+          echo "demo mode requires Isaac Sim GUI; ignoring --headless" >&2
+          shift
+          ;;
+        *)
+          DEMO_ARGS+=("$1")
+          shift
+          ;;
+      esac
+    done
+    echo "=== MyCobot EE reach showcase (continuous demo) ==="
+    echo "Single arm | red target sphere | runs until you close Isaac Sim or Ctrl+C"
+    (
+      cd "${ISAACLAB_PATH}"
+      export TERM="${TERM:-xterm-256color}"
+      ./isaaclab.sh -p "${REPO_ROOT}/isaac_lab/play_ppo.py" "${DEMO_ARGS[@]}"
+    )
+    ;;
   *)
-    echo "Usage: $0 {check|install|verify|train|play} [args...]" >&2
+    echo "Usage: $0 {check|install|verify|train|play|demo} [args...]" >&2
     exit 1
     ;;
 esac

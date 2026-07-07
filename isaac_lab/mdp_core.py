@@ -21,8 +21,6 @@ verification nodes. See spec.md § Phase 2 and README.md for the full pipeline.
 External references:
   - Potential-based reward shaping: Ng et al., ICML 1999
     https://people.eecs.berkeley.edu/~pabbeel/papers/ng99policyinvariance.pdf
-  - Operational-space / Cartesian control: Khatib, IJRR 1987
-    https://doi.org/10.1177/027836498700600304
 """
 
 from __future__ import annotations
@@ -37,10 +35,10 @@ import random
 # Motion-policy layout: 3 EE-to-target delta + target_valid + reached + 6 joints = 11.
 OBSERVATION_DIM = 11
 
-# Phase 2 reach: Cartesian Δx, Δy, Δz in the robot base frame (task-space RL).
-REACH_ACTION_DIM = 3
+# Phase 2 reach: joint deltas — the RL policy learns IK (see spec.md § no IK solvers).
+REACH_ACTION_DIM = 6
 
-# Phase 6 contact-and-push still uses joint deltas (vision + contact stack).
+# Phase 6 contact-and-push uses the same joint-delta layout.
 ACTION_DIM = 6
 
 REVOLUTE_JOINT_NAMES = (
@@ -63,6 +61,12 @@ MAX_BLOCK_REACH_M = 0.28
 MIN_EE_TARGET_Z_M = 0.08
 MAX_EE_TARGET_Z_M = 0.22
 BLOCK_SPAWN_Z = 0.021
+
+# Demo/showcase: stratified bins + minimum 3D separation between consecutive targets.
+DEMO_MIN_TARGET_SEPARATION_M = 0.10
+DEMO_AZIMUTH_BINS = 8
+DEMO_Z_BINS = 4
+DEMO_RADIUS_BINS = 3
 
 
 @dataclass(frozen=True)
@@ -87,24 +91,22 @@ REACH_CURRICULUM_STAGES: tuple[ReachCurriculumStage, ...] = (
 class ReachTaskConfig:
     """Phase 2 EE reach-to-target task parameters.
 
-    ``cartesian_action_scale`` is the maximum EE displacement (meters) per
-    control step when the policy outputs ±1.0 on a Cartesian axis. The policy
-    learns *which direction* to move; the Jacobian maps that intent to joints.
-  """
+    ``action_scale`` multiplies normalized policy outputs (≈[-1,1]) into joint
+    position deltas (radians per control step). The PPO policy learns how to
+    combine these deltas so the EE reaches the target — that coordination is
+    the learned IK (spec.md § strategic goal).
+    """
 
     reach_tolerance_m: float = EE_REACH_TOLERANCE_M
     min_reach_m: float = MIN_BLOCK_REACH_M
     max_reach_m: float = MAX_BLOCK_REACH_M
     min_target_z_m: float = MIN_EE_TARGET_Z_M
     max_target_z_m: float = MAX_EE_TARGET_Z_M
-    cartesian_action_scale: float = 0.025
-    jacobian_damping: float = 0.05
-    time_penalty: float = 0.04
-    reach_bonus: float = 30.0
-    progress_scale: float = 40.0
+    action_scale: float = 0.12
+    time_penalty: float = 0.02
+    reach_bonus: float = 35.0
+    progress_scale: float = 50.0
     timeout_penalty: float = 5.0
-    # Legacy alias used by joint-space helpers and Phase 6 bridge code.
-    action_scale: float = 0.18
 
 
 @dataclass(frozen=True)
@@ -162,6 +164,208 @@ def resolve_curriculum_stage(
     return stages[-1]
 
 
+def is_ee_target_in_workspace(
+    x: float,
+    y: float,
+    z: float,
+    *,
+    min_reach_m: float = MIN_BLOCK_REACH_M,
+    max_reach_m: float = MAX_BLOCK_REACH_M,
+    min_z_m: float = MIN_EE_TARGET_Z_M,
+    max_z_m: float = MAX_EE_TARGET_Z_M,
+    robot_base_x: float = 0.0,
+    robot_base_y: float = 0.0,
+) -> bool:
+    """Return True when (x, y, z) lies in the Phase 2 reach envelope (spec.md)."""
+
+    radius = math.hypot(x - robot_base_x, y - robot_base_y)
+    return min_reach_m <= radius <= max_reach_m and min_z_m <= z <= max_z_m
+
+
+def sample_offset_in_ball(radius_m: float) -> tuple[float, float, float]:
+    """Uniform random offset inside a 3D ball of the given radius."""
+
+    limit = max(radius_m, 0.0)
+    if limit == 0.0:
+        return 0.0, 0.0, 0.0
+    while True:
+        dx = random.uniform(-limit, limit)
+        dy = random.uniform(-limit, limit)
+        dz = random.uniform(-limit, limit)
+        if dx * dx + dy * dy + dz * dz <= limit * limit:
+            return dx, dy, dz
+
+
+def _sample_workspace_xyz(
+    *,
+    min_reach_m: float,
+    max_reach_m: float,
+    min_z_m: float,
+    max_z_m: float,
+    robot_base_x: float,
+    robot_base_y: float,
+) -> tuple[float, float, float]:
+    angle = random.uniform(0.0, 2.0 * math.pi)
+    radius = random.uniform(min_reach_m, max_reach_m)
+    x = robot_base_x + radius * math.cos(angle)
+    y = robot_base_y + radius * math.sin(angle)
+    z = random.uniform(min_z_m, max_z_m)
+    return x, y, z
+
+
+def _sample_stratified_workspace_xyz(
+    *,
+    min_reach_m: float,
+    max_reach_m: float,
+    min_z_m: float,
+    max_z_m: float,
+    robot_base_x: float,
+    robot_base_y: float,
+    azimuth_bin: int | None = None,
+    z_bin: int | None = None,
+    radius_bin: int | None = None,
+) -> tuple[float, float, float]:
+    """Pick a target from a random workspace cell (azimuth × radius × height)."""
+
+    az_bin = azimuth_bin if azimuth_bin is not None else random.randrange(DEMO_AZIMUTH_BINS)
+    z_cell = z_bin if z_bin is not None else random.randrange(DEMO_Z_BINS)
+    r_cell = radius_bin if radius_bin is not None else random.randrange(DEMO_RADIUS_BINS)
+
+    angle = (az_bin + random.uniform(0.15, 0.85)) / DEMO_AZIMUTH_BINS * (2.0 * math.pi)
+    r_span = (max_reach_m - min_reach_m) / DEMO_RADIUS_BINS
+    radius = random.uniform(
+        min_reach_m + r_cell * r_span,
+        min_reach_m + (r_cell + 1) * r_span,
+    )
+    z_span = (max_z_m - min_z_m) / DEMO_Z_BINS
+    z = random.uniform(
+        min_z_m + z_cell * z_span,
+        min_z_m + (z_cell + 1) * z_span,
+    )
+    x = robot_base_x + radius * math.cos(angle)
+    y = robot_base_y + radius * math.sin(angle)
+    return x, y, z
+
+
+def sample_demo_workspace_xyz(
+    count: int,
+    *,
+    previous_targets: Sequence[tuple[float, float, float]] | None = None,
+    min_separation_m: float = DEMO_MIN_TARGET_SEPARATION_M,
+    min_azimuth_separation_rad: float = math.pi / 4.0,
+    min_reach_m: float = MIN_BLOCK_REACH_M,
+    max_reach_m: float = MAX_BLOCK_REACH_M,
+    min_z_m: float = MIN_EE_TARGET_Z_M,
+    max_z_m: float = MAX_EE_TARGET_Z_M,
+    robot_base_x: float = 0.0,
+    robot_base_y: float = 0.0,
+) -> list[tuple[float, float, float]]:
+    """High-variability demo targets within the reach envelope.
+
+    Samples uniformly over the workspace (same envelope as training/play), but
+    rejects candidates that are too close to the previous target or lie in a
+    similar azimuth sector. Stratified cells are used only as a last resort to
+    guarantee separation so consecutive demo targets look visibly different
+    without forcing extreme corner placements.
+    """
+
+    def _azimuth(x: float, y: float) -> float:
+        return math.atan2(y - robot_base_y, x - robot_base_x)
+
+    def _angular_delta(a1: float, a2: float) -> float:
+        delta = abs(a1 - a2)
+        return min(delta, 2.0 * math.pi - delta)
+
+    samples: list[tuple[float, float, float]] = []
+    for idx in range(max(count, 0)):
+        prev = None
+        if previous_targets is not None and idx < len(previous_targets):
+            prev = previous_targets[idx]
+
+        chosen: tuple[float, float, float] | None = None
+        prev_az = _azimuth(prev[0], prev[1]) if prev is not None else None
+        for _ in range(64):
+            candidate = _sample_workspace_xyz(
+                min_reach_m=min_reach_m,
+                max_reach_m=max_reach_m,
+                min_z_m=min_z_m,
+                max_z_m=max_z_m,
+                robot_base_x=robot_base_x,
+                robot_base_y=robot_base_y,
+            )
+            if prev is None:
+                chosen = candidate
+                break
+            sep_ok = math.dist(prev, candidate) >= min_separation_m
+            az_ok = (
+                prev_az is None
+                or _angular_delta(prev_az, _azimuth(candidate[0], candidate[1]))
+                >= min_azimuth_separation_rad
+            )
+            if sep_ok and az_ok:
+                chosen = candidate
+                break
+
+        if chosen is None:
+            for _ in range(32):
+                candidate = _sample_stratified_workspace_xyz(
+                    min_reach_m=min_reach_m,
+                    max_reach_m=max_reach_m,
+                    min_z_m=min_z_m,
+                    max_z_m=max_z_m,
+                    robot_base_x=robot_base_x,
+                    robot_base_y=robot_base_y,
+                )
+                if prev is None or math.dist(prev, candidate) >= min_separation_m * 0.5:
+                    chosen = candidate
+                    break
+
+        if chosen is None:
+            chosen = _sample_workspace_xyz(
+                min_reach_m=min_reach_m,
+                max_reach_m=max_reach_m,
+                min_z_m=min_z_m,
+                max_z_m=max_z_m,
+                robot_base_x=robot_base_x,
+                robot_base_y=robot_base_y,
+            )
+        samples.append(chosen)
+    return samples
+
+
+def _sample_near_center_xyz(
+    center: tuple[float, float, float],
+    *,
+    radius_m: float,
+    min_reach_m: float,
+    max_reach_m: float,
+    min_z_m: float,
+    max_z_m: float,
+    robot_base_x: float,
+    robot_base_y: float,
+    max_attempts: int = 48,
+) -> tuple[float, float, float] | None:
+    """Sample a target in a 3D ball around ``center`` that also lies in the workspace."""
+
+    cx, cy, cz = center
+    for _ in range(max_attempts):
+        dx, dy, dz = sample_offset_in_ball(radius_m)
+        x, y, z = cx + dx, cy + dy, cz + dz
+        if is_ee_target_in_workspace(
+            x,
+            y,
+            z,
+            min_reach_m=min_reach_m,
+            max_reach_m=max_reach_m,
+            min_z_m=min_z_m,
+            max_z_m=max_z_m,
+            robot_base_x=robot_base_x,
+            robot_base_y=robot_base_y,
+        ):
+            return x, y, z
+    return None
+
+
 def sample_reachable_ee_xyz(
     count: int,
     *,
@@ -180,32 +384,46 @@ def sample_reachable_ee_xyz(
     """Sample random EE target positions within the arm reach envelope.
 
     When ``near_ee_center`` is set and the easy draw succeeds, targets are
-    sampled in a small ball around the **current EE pose** (curriculum stage 1).
-    Otherwise targets fall back to ``easy_center`` or the full workspace annulus.
+    sampled uniformly in a 3D ball around the **current EE pose** (curriculum
+    stage 1), then validated against the workspace envelope. If no valid point
+    is found inside the ball ∩ workspace, sampling falls back to the full
+    workspace annulus so targets are always reachable positions per spec.md.
     """
 
     samples: list[tuple[float, float, float]] = []
     for _ in range(max(count, 0)):
+        placed = False
         if easy_fraction > 0.0 and random.random() < easy_fraction:
             if near_ee_center is not None:
-                cx, cy, cz = near_ee_center
+                center = near_ee_center
                 radius_limit = near_ee_radius_m
             else:
-                cx, cy, cz = easy_center
+                center = easy_center
                 radius_limit = easy_radius_m
-            angle = random.uniform(0.0, 2.0 * math.pi)
-            radius = random.uniform(0.0, radius_limit)
-            x = cx + radius * math.cos(angle)
-            y = cy + radius * math.sin(angle)
-            z = cz + random.uniform(-0.03, 0.03)
-            samples.append((x, y, max(min_z_m, min(max_z_m, z))))
-            continue
-        angle = random.uniform(0.0, 2.0 * math.pi)
-        radius = random.uniform(min_reach_m, max_reach_m)
-        x = robot_base_x + radius * math.cos(angle)
-        y = robot_base_y + radius * math.sin(angle)
-        z = random.uniform(min_z_m, max_z_m)
-        samples.append((x, y, z))
+            near_sample = _sample_near_center_xyz(
+                center,
+                radius_m=radius_limit,
+                min_reach_m=min_reach_m,
+                max_reach_m=max_reach_m,
+                min_z_m=min_z_m,
+                max_z_m=max_z_m,
+                robot_base_x=robot_base_x,
+                robot_base_y=robot_base_y,
+            )
+            if near_sample is not None:
+                samples.append(near_sample)
+                placed = True
+        if not placed:
+            samples.append(
+                _sample_workspace_xyz(
+                    min_reach_m=min_reach_m,
+                    max_reach_m=max_reach_m,
+                    min_z_m=min_z_m,
+                    max_z_m=max_z_m,
+                    robot_base_x=robot_base_x,
+                    robot_base_y=robot_base_y,
+                ),
+            )
     return samples
 
 
@@ -260,80 +478,6 @@ def compute_reach_task_reward(
     if distance <= task.reach_tolerance_m:
         reward += task.reach_bonus
     return reward, distance
-
-
-def damped_least_squares_joint_delta(
-    jacobian: Sequence[Sequence[float]],
-    cartesian_delta: Sequence[float],
-    *,
-    damping: float = 0.05,
-) -> list[float]:
-    """Map a 3D Cartesian EE delta to joint deltas via damped least squares (DLS).
-
-    Solves ``dq = J^T (J J^T + λ² I)⁻¹ dx`` for a 3×N positional Jacobian.
-    Used in unit tests and as the reference for GPU batched code in
-    ``isaac_lab/cartesian_actuation.py``. This is a **low-level actuator map**,
-    not analytic IK: the RL policy still chooses ``dx`` each step.
-
-    References:
-      - Buss, "Introduction to Inverse Kinematics" (DLS section)
-        https://www.math.ucsd.edu/~sbuss/ResearchWeb/ikmethods/iksurvey.pdf
-    """
-
-    if len(cartesian_delta) != 3:
-        raise ValueError('cartesian_delta must have length 3')
-    num_joints = len(jacobian[0]) if jacobian else 0
-    if num_joints == 0:
-        return []
-    for row in jacobian:
-        if len(row) != num_joints:
-            raise ValueError('Jacobian rows must share the same width')
-
-    lam2 = damping * damping
-    # A = J J^T + λ² I  (3×3)
-    a00 = a01 = a02 = a11 = a12 = a22 = 0.0
-    for col in range(num_joints):
-        j0 = jacobian[0][col]
-        j1 = jacobian[1][col]
-        j2 = jacobian[2][col]
-        a00 += j0 * j0
-        a01 += j0 * j1
-        a02 += j0 * j2
-        a11 += j1 * j1
-        a12 += j1 * j2
-        a22 += j2 * j2
-    a00 += lam2
-    a11 += lam2
-    a22 += lam2
-
-    det = (
-        a00 * (a11 * a22 - a12 * a12)
-        - a01 * (a01 * a22 - a02 * a12)
-        + a02 * (a01 * a12 - a02 * a11)
-    )
-    if abs(det) < 1e-12:
-        return [0.0] * num_joints
-    inv_det = 1.0 / det
-    i00 = (a11 * a22 - a12 * a12) * inv_det
-    i01 = (a02 * a12 - a01 * a22) * inv_det
-    i02 = (a01 * a12 - a02 * a11) * inv_det
-    i11 = (a00 * a22 - a02 * a02) * inv_det
-    i12 = (a02 * a01 - a00 * a12) * inv_det
-    i22 = (a00 * a11 - a01 * a01) * inv_det
-
-    dx, dy, dz = (float(v) for v in cartesian_delta)
-    y0 = i00 * dx + i01 * dy + i02 * dz
-    y1 = i01 * dx + i11 * dy + i12 * dz
-    y2 = i02 * dx + i12 * dy + i22 * dz
-
-    joint_delta = [0.0] * num_joints
-    for col in range(num_joints):
-        joint_delta[col] = (
-            jacobian[0][col] * y0
-            + jacobian[1][col] * y1
-            + jacobian[2][col] * y2
-        )
-    return joint_delta
 
 
 def episode_reach_success(

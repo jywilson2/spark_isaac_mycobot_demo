@@ -103,3 +103,35 @@ def test_training_completion_report_formats_duration() -> None:
     text = report.format()
     assert 'Total execution time: 00:01:35' in text
     assert 'task_requirement_met' in text or 'Task requirement met: YES' in text
+
+
+def test_reach_improvement_tracker_detects_plateau() -> None:
+    from isaac_lab.training_success import _ReachImprovementTracker
+
+    tracker = _ReachImprovementTracker(
+        warmup_iterations=5,
+        plateau_window_iterations=10,
+        min_improvement=0.02,
+    )
+    for it in range(1, 5):
+        assert not tracker.update(iteration=it, reach_success_rate=0.50)
+    assert not tracker.update(iteration=5, reach_success_rate=0.52)
+    for it in range(6, 16):
+        assert not tracker.update(iteration=it, reach_success_rate=0.525)
+    assert tracker.update(iteration=16, reach_success_rate=0.525) is True
+
+
+def test_reach_improvement_tracker_resets_on_gain() -> None:
+    from isaac_lab.training_success import _ReachImprovementTracker
+
+    tracker = _ReachImprovementTracker(
+        warmup_iterations=1,
+        plateau_window_iterations=5,
+        min_improvement=0.01,
+    )
+    tracker.update(iteration=1, reach_success_rate=0.60)
+    for it in range(2, 6):
+        tracker.update(iteration=it, reach_success_rate=0.605)
+    assert tracker.update(iteration=6, reach_success_rate=0.605) is True
+    assert not tracker.update(iteration=7, reach_success_rate=0.62)
+    assert tracker.last_improvement_iteration == 7

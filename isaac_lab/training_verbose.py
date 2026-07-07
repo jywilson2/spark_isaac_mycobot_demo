@@ -24,13 +24,14 @@ from __future__ import annotations
 from typing import Any
 
 from isaac_lab.mdp_core import (
+    ACTION_DIM,
     EE_REACH_TOLERANCE_M,
     END_EFFECTOR_BODY_NAME,
     MAX_BLOCK_REACH_M,
     MIN_BLOCK_REACH_M,
     OBSERVATION_DIM,
-    REACH_ACTION_DIM,
     REACH_CURRICULUM_STAGES,
+    REVOLUTE_JOINT_NAMES,
     ReachTaskConfig,
 )
 
@@ -47,13 +48,14 @@ def format_reach_motion_glossary(
 
     cfg = task_cfg or ReachTaskConfig()
     stage_text = curriculum_stage or REACH_CURRICULUM_STAGES[0].name
+    joint_list = ', '.join(REVOLUTE_JOINT_NAMES)
     lines = [
         '=' * 72,
         'MyCobot Phase 2 — RL reach tutorial (verbose console)',
         '=' * 72,
         '',
-        'Goal: learn efficient EE motion to random 3D targets without analytic IK.',
-        'Docs: spec.md § Phase 2 | isaac_lab/mdp_core.py | cartesian_actuation.py',
+        'Goal: PPO learns IK-style reach (joint coordination) — no IK solver in the loop.',
+        'Docs: spec.md § Phase 2 | isaac_lab/mdp_core.py | mycobot_reach_env.py',
         '',
         '--- Training budget ---',
         f'  Parallel arms (envs):     {num_envs}',
@@ -64,23 +66,17 @@ def format_reach_motion_glossary(
         '--- Observations (policy vector, '
         f'{OBSERVATION_DIM}-dim) → what the network sees each step ---',
         '  obs[0:3]  EE-to-target delta (m), normalized by max reach',
-        '            Positive X: target is forward of current EE in base frame.',
-        '            Positive Y: target is left of current EE.',
-        '            Positive Z: target is above current EE.',
-        f'  obs[3]    target_valid (=1): known 3D target from task generator (no vision).',
-        '  obs[4]    reached flag: 1 after EE enters success volume.',
-        '  obs[5:11] joint positions (rad) for arm2..flange — proprioception.',
+        '  obs[3]    target_valid (=1): known 3D target (no vision in Phase 2)',
+        '  obs[4]    reached flag: 1 after EE enters success volume',
+        f'  obs[5:11] joint positions (rad): {joint_list}',
         '',
         '--- Actions ('
-        f'{REACH_ACTION_DIM}-dim Cartesian) → how motion is commanded ---',
-        '  action[0:3]  Δx, Δy, Δz in robot base frame (scaled, clipped to ±1).',
-        f'               Scale: {cfg.cartesian_action_scale * 1000:.1f} mm per unit per control step.',
-        '               Example: action=[1,0,0] requests ~'
-        f'{cfg.cartesian_action_scale * 1000:.1f} mm forward at the EE.',
-        '  Low-level map: damped least-squares Jacobian → joint position targets.',
-        f'               Damping λ={cfg.jacobian_damping} stabilizes singular poses.',
-        '               See: isaac_lab/cartesian_actuation.py',
-        f'  Joint limits: clamped to URDF soft limits ({END_EFFECTOR_BODY_NAME} body).',
+        f'{ACTION_DIM}-dim joint space) → learned IK ---',
+        f'  action[0:5]  Δq per revolute joint (scaled by {cfg.action_scale} rad per unit action).',
+        '               The policy chooses how each joint moves each step; combined motion',
+        f'               should drive {END_EFFECTOR_BODY_NAME} toward the target.',
+        '               No analytic/differential IK solver is used (project requirement).',
+        '  Joint limits: clamped to URDF soft limits after applying deltas.',
         '',
         '--- Rewards → what PPO optimizes ---',
         f'  Progress:  {cfg.progress_scale} × (d_prev − d_now) when moving closer.',
@@ -88,7 +84,6 @@ def format_reach_motion_glossary(
         f'  Success:   +{cfg.reach_bonus} when distance ≤ '
         f'{EE_REACH_TOLERANCE_M * 1000:.0f} mm (early episode end).',
         f'  Timeout:   −{cfg.timeout_penalty} if episode ends without reach.',
-        '  Reference: Ng et al. potential-based shaping (mdp_core module docstring).',
         '',
         '--- Workspace & curriculum ---',
         f'  Reach annulus: {MIN_BLOCK_REACH_M:.2f}–{MAX_BLOCK_REACH_M:.2f} m horizontal radius.',
@@ -103,10 +98,13 @@ def format_reach_motion_glossary(
     lines.extend(
         [
             '',
+            '--- Host execution ---',
+            '  Training runs on the DGX Spark host (Isaac Sim). From the container,',
+            '  scripts auto-delegate via nsenter — see spec.md § Host vs container.',
+            '',
             '--- External references ---',
             '  Isaac Lab:  https://isaac-sim.github.io/IsaacLab/',
             '  RSL-RL PPO: https://github.com/leggedrobotics/rsl_rl',
-            '  ROS 2 Jazzy control bridge: spark_verify_pkg/ (Phase 3–4)',
             '=' * 72,
         ]
     )
@@ -126,7 +124,7 @@ def format_iteration_motion_snapshot(
     return (
         f'[verbose] iter {iteration}: curriculum={curriculum_stage}, '
         f'reach={reach_rate:.1%}, mean_time_to_reach={mean_time:.2f}s '
-        f'(lower time ⇒ more efficient motion)'
+        f'(lower time ⇒ more efficient learned motion)'
     )
 
 

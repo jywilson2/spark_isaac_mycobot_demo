@@ -21,7 +21,7 @@ from isaaclab_rl.rsl_rl import RslRlMLPModelCfg, RslRlOnPolicyRunnerCfg, RslRlPp
 
 @configclass
 class MyCobotPPORunnerCfg(RslRlOnPolicyRunnerCfg):
-    num_steps_per_env = 32
+    num_steps_per_env = 64
     max_iterations = 20
     save_interval = 10
     experiment_name = 'mycobot_reach'
@@ -44,10 +44,10 @@ class MyCobotPPORunnerCfg(RslRlOnPolicyRunnerCfg):
         value_loss_coef=1.0,
         use_clipped_value_loss=True,
         clip_param=0.2,
-        entropy_coef=0.01,
-        num_learning_epochs=4,
+        entropy_coef=0.02,
+        num_learning_epochs=5,
         num_mini_batches=4,
-        learning_rate=3.0e-4,
+        learning_rate=5.0e-4,
         schedule='adaptive',
         gamma=0.99,
         lam=0.95,

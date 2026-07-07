@@ -19,12 +19,13 @@ from __future__ import annotations
 from isaac_lab.training_verbose import format_reach_motion_glossary
 
 
-def test_verbose_glossary_mentions_cartesian_actions() -> None:
+def test_verbose_glossary_mentions_joint_actions() -> None:
     text = format_reach_motion_glossary(
         num_envs=8,
         max_duration_minutes=30.0,
         target_reach_success_rate=0.99,
     )
-    assert 'Δx, Δy, Δz' in text
+    assert 'joint space' in text.lower()
+    assert 'no analytic' in text.lower() or 'no IK solver' in text
     assert 'curriculum' in text.lower()
-    assert '30.0 min' in text
+    assert 'nsenter' in text.lower()

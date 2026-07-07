@@ -82,6 +82,12 @@ class TrainingSuccessCriteria:
     target_push_distance_m: float = TARGET_PUSH_DISTANCE_M
     min_eval_episodes: int = 8
 
+    # Early abort when reach success stops improving (Phase 2 duration-bounded runs).
+    abort_on_plateau: bool = True
+    plateau_warmup_iterations: int = 40
+    plateau_window_iterations: int = 120
+    min_reach_improvement: float = 0.01
+
 
 @dataclass(frozen=True)
 class TaskMetrics:
@@ -477,6 +483,34 @@ def _action_std_value(action_std: Any) -> float:
     return float(action_std)
 
 
+@dataclass
+class _ReachImprovementTracker:
+    """Track best rolling reach success and detect training plateaus."""
+
+    warmup_iterations: int
+    plateau_window_iterations: int
+    min_improvement: float
+    best_reach: float = 0.0
+    last_improvement_iteration: int = 0
+
+    def update(self, *, iteration: int, reach_success_rate: float) -> bool:
+        """Return True when training should abort due to lack of improvement."""
+
+        if iteration < self.warmup_iterations:
+            if reach_success_rate > self.best_reach:
+                self.best_reach = reach_success_rate
+                self.last_improvement_iteration = iteration
+            return False
+
+        if reach_success_rate > self.best_reach + self.min_improvement:
+            self.best_reach = reach_success_rate
+            self.last_improvement_iteration = iteration
+            return False
+
+        stalled_for = iteration - self.last_improvement_iteration
+        return stalled_for >= self.plateau_window_iterations
+
+
 def run_training_with_reports(
     runner: Any,
     *,
@@ -488,6 +522,7 @@ def run_training_with_reports(
     iteration_chunk: int | None = None,
     verbose: bool = False,
     verbose_curriculum_fn: Callable[[], str] | None = None,
+    abort_on_plateau: bool | None = None,
 ) -> tuple[list[IterationReport], float, str]:
     """Run PPO learning with per-iteration success criteria output.
 
@@ -512,6 +547,14 @@ def run_training_with_reports(
 
     started = time.perf_counter()
     iterations_remaining = num_learning_iterations
+    plateau_enabled = (
+        criteria.abort_on_plateau if abort_on_plateau is None else abort_on_plateau
+    )
+    plateau_tracker = _ReachImprovementTracker(
+        warmup_iterations=criteria.plateau_warmup_iterations,
+        plateau_window_iterations=criteria.plateau_window_iterations,
+        min_improvement=criteria.min_reach_improvement,
+    )
 
     def wrapped_log(*args: Any, **kwargs: Any) -> None:
         nonlocal stop_reason
@@ -554,6 +597,24 @@ def run_training_with_reports(
             if history_len >= criteria.min_eval_episodes:
                 stop_reason = 'task_requirement_met'
                 raise _StopTrainingSuccess()
+        if (
+            plateau_enabled
+            and criteria.task_mode == 'reach'
+            and metrics.metrics_source == 'episode'
+            and metrics.completed_episodes >= criteria.min_eval_episodes
+        ):
+            reach_rate = metrics.task_metrics.reach_success_rate
+            if plateau_tracker.update(iteration=metrics.iteration, reach_success_rate=reach_rate):
+                stop_reason = 'no_improvement'
+                print(
+                    f'\n=== Training plateau detected ===\n'
+                    f'Best reach success: {plateau_tracker.best_reach:.1%}\n'
+                    f'No improvement >= {criteria.min_reach_improvement:.1%} for '
+                    f'{criteria.plateau_window_iterations} iterations '
+                    f'(since iteration {plateau_tracker.last_improvement_iteration}).\n'
+                    f'Aborting training early.\n'
+                )
+                raise _StopTrainingPlateau()
         if max_duration_s is not None and (time.perf_counter() - started) >= max_duration_s:
             stop_reason = 'max_duration'
             raise _StopTrainingTimeLimit()
@@ -578,7 +639,7 @@ def run_training_with_reports(
                     num_learning_iterations=learn_steps,
                     init_at_random_ep_len=init_at_random_ep_len,
                 )
-            except (_StopTrainingSuccess, _StopTrainingTimeLimit):
+            except (_StopTrainingSuccess, _StopTrainingTimeLimit, _StopTrainingPlateau):
                 break
 
             if not unlimited:
@@ -587,7 +648,7 @@ def run_training_with_reports(
                     stop_reason = 'max_iterations'
                     break
             init_at_random_ep_len = False
-    except (_StopTrainingSuccess, _StopTrainingTimeLimit):
+    except (_StopTrainingSuccess, _StopTrainingTimeLimit, _StopTrainingPlateau):
         pass
     elapsed = time.perf_counter() - started
     runner.logger.log = original_log
@@ -600,3 +661,7 @@ class _StopTrainingSuccess(Exception):
 
 class _StopTrainingTimeLimit(Exception):
     """Internal control-flow exception when max training duration is reached."""
+
+
+class _StopTrainingPlateau(Exception):
+    """Internal control-flow exception when reach success stops improving."""

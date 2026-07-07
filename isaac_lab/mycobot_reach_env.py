@@ -17,7 +17,7 @@
 Tutorial overview (see spec.md § Phase 2):
   1. Each episode samples a reachable 3D target; a red kinematic sphere marks it.
   2. Observations give the EE-to-target vector + joint proprioception (no vision).
-  3. Actions are Cartesian Δx, Δy, Δz; cartesian_actuation maps them to joints.
+  3. Actions are **joint position deltas** (Δq); the policy learns IK-style coordination.
   4. Rewards use potential-based distance reduction + time penalty + reach bonus.
   5. Curriculum widens target difficulty as rolling success improves.
 
@@ -30,6 +30,7 @@ from __future__ import annotations
 from collections import deque
 from collections.abc import Sequence
 from pathlib import Path
+from typing import Any
 
 import gymnasium as gym
 import torch
@@ -44,20 +45,17 @@ from isaaclab.sim import SimulationCfg, UsdFileCfg
 from isaaclab.sim.spawners.from_files import GroundPlaneCfg, spawn_ground_plane
 from isaaclab.utils import configclass
 
-from isaac_lab.cartesian_actuation import (
-    cartesian_actions_to_joint_targets,
-    resolve_arm_joint_indices,
-)
 from isaac_lab.mdp_core import (
+    ACTION_DIM,
     EE_REACH_TOLERANCE_M,
     END_EFFECTOR_BODY_NAME,
     OBSERVATION_DIM,
-    REACH_ACTION_DIM,
     REVOLUTE_JOINT_NAMES,
     ReachTaskConfig,
     compute_reach_task_reward,
     episode_reach_success,
     resolve_curriculum_stage,
+    sample_demo_workspace_xyz,
     sample_reachable_ee_xyz,
 )
 
@@ -92,13 +90,16 @@ class MyCobotReachEnvCfg(DirectRLEnvCfg):
 
     decimation = 2
     episode_length_s = 10.0
-    action_space = REACH_ACTION_DIM
+    action_space = ACTION_DIM
     observation_space = OBSERVATION_DIM
     state_space = 0
-    cartesian_action_scale: float = 0.025
-    jacobian_damping: float = 0.05
+    action_scale: float = 0.12
     robot_usd_path: str = str(DEFAULT_ROBOT_USD)
     checkpoint_dir: str = str(DEFAULT_CHECKPOINT_DIR)
+    # ``curriculum`` — staged easy→hard sampling during training.
+    # ``workspace`` — uniform over the full reach envelope (play).
+    # ``demo`` — stratified workspace cells + min separation (showcase).
+    target_sampling: str = 'curriculum'
 
     sim: SimulationCfg = SimulationCfg(dt=1.0 / 60.0, render_interval=decimation)
     scene: InteractiveSceneCfg = InteractiveSceneCfg(
@@ -159,12 +160,8 @@ class MyCobotReachEnv(DirectRLEnv):
         render_mode: str | None = None,
         **kwargs,
     ) -> None:
-        self._task_cfg = ReachTaskConfig(
-            cartesian_action_scale=cfg.cartesian_action_scale,
-            jacobian_damping=cfg.jacobian_damping,
-        )
+        self._task_cfg = ReachTaskConfig(action_scale=cfg.action_scale)
         self._ee_body_idx = 0
-        self._arm_joint_indices: list[int] = []
         self._target_ee_pos = None
         self._episode_reached = None
         self._episode_steps_to_reach = None
@@ -172,6 +169,9 @@ class MyCobotReachEnv(DirectRLEnv):
         self._time_to_reach_history: deque[float] = deque(maxlen=EPISODE_METRICS_HISTORY)
         self._prev_distance: torch.Tensor | None = None
         self._curriculum_stage_name = 'near_ee'
+        self._demo_target_initialized = False
+        self._last_demo_targets: torch.Tensor | None = None
+        self._terminal_episode_outcomes: dict[int, dict[str, Any]] = {}
         super().__init__(cfg, render_mode, **kwargs)
         self._reach_ready_joint_pos = self._build_reach_ready_tensor()
         ee_indices, _ee_names = self._robot.find_bodies(END_EFFECTOR_BODY_NAME)
@@ -181,7 +181,6 @@ class MyCobotReachEnv(DirectRLEnv):
                 f'End-effector body {END_EFFECTOR_BODY_NAME!r} not found. '
                 f'Available bodies include: {available}')
         self._ee_body_idx = ee_indices[0]
-        self._arm_joint_indices = resolve_arm_joint_indices(self._robot)
         self._init_episode_state()
 
     def _setup_scene(self) -> None:
@@ -219,8 +218,22 @@ class MyCobotReachEnv(DirectRLEnv):
         count: int,
         *,
         near_ee_centers: torch.Tensor | None = None,
+        previous_targets: list[tuple[float, float, float]] | None = None,
     ) -> torch.Tensor:
-        """Sample targets using the active curriculum stage (spec.md § Phase 2)."""
+        """Sample targets within the arm reach envelope (spec.md § Phase 2)."""
+
+        if self.cfg.target_sampling == 'demo':
+            self._curriculum_stage_name = 'demo'
+            batch = sample_demo_workspace_xyz(
+                count,
+                previous_targets=previous_targets,
+            )
+            return torch.tensor(batch, dtype=torch.float, device=self.device)
+
+        if self.cfg.target_sampling == 'workspace':
+            self._curriculum_stage_name = 'workspace'
+            batch = sample_reachable_ee_xyz(count, easy_fraction=0.0)
+            return torch.tensor(batch, dtype=torch.float, device=self.device)
 
         recent_rate = self._rolling_reach_success_rate()
         stage = resolve_curriculum_stage(recent_rate)
@@ -252,8 +265,23 @@ class MyCobotReachEnv(DirectRLEnv):
 
     def _reset_target_marker(self, env_ids: torch.Tensor) -> None:
         ee_pos = self._ee_position_base()[env_ids]
-        local_pos = self._sample_target_positions(env_ids.numel(), near_ee_centers=ee_pos)
+        previous_targets = None
+        if self.cfg.target_sampling == 'demo' and self._demo_target_initialized:
+            previous_targets = [
+                tuple(self._last_demo_targets[i].detach().cpu().tolist())
+                for i in env_ids.tolist()
+            ]
+        local_pos = self._sample_target_positions(
+            env_ids.numel(),
+            near_ee_centers=ee_pos,
+            previous_targets=previous_targets,
+        )
         self._target_ee_pos[env_ids] = local_pos
+        if self.cfg.target_sampling == 'demo':
+            if self._last_demo_targets is None:
+                self._last_demo_targets = torch.zeros_like(self._target_ee_pos)
+            self._last_demo_targets[env_ids] = local_pos
+            self._demo_target_initialized = True
         world_pos = local_pos + self.scene.env_origins[env_ids]
         root_state = self._target_marker.data.default_root_state[env_ids].clone()
         root_state[:, 0:3] = world_pos
@@ -286,16 +314,9 @@ class MyCobotReachEnv(DirectRLEnv):
         self.actions = actions.clone()
 
     def _apply_action(self) -> None:
-        """Map Cartesian policy output to joint targets (see cartesian_actuation.py)."""
+        """Apply learned joint deltas — the policy is the IK controller (spec.md)."""
 
-        targets = cartesian_actions_to_joint_targets(
-            self._robot,
-            cartesian_actions=self.actions,
-            cartesian_action_scale=self._task_cfg.cartesian_action_scale,
-            ee_body_idx=self._ee_body_idx,
-            joint_indices=self._arm_joint_indices,
-            damping=self._task_cfg.jacobian_damping,
-        )
+        targets = self._robot.data.joint_pos.torch + self.cfg.action_scale * self.actions
         limits = getattr(self._robot.data, 'soft_joint_pos_limits', None)
         if limits is not None and limits.numel() > 0:
             lower = limits[..., 0]
@@ -363,13 +384,28 @@ class MyCobotReachEnv(DirectRLEnv):
 
     def _record_episode_outcomes(self, env_ids: torch.Tensor) -> None:
         step_dt = self.cfg.sim.dt * self.cfg.decimation
+        ee_pos = self._ee_position_base()
+        distance = self._distance_to_target(ee_pos)
         for env_idx in env_ids.detach().cpu().tolist():
             reached = bool(self._episode_reached[env_idx].item())
+            steps = float(self._episode_steps_to_reach[env_idx].item())
+            self._terminal_episode_outcomes[env_idx] = {
+                'reached': reached,
+                'time_to_reach_s': steps * step_dt if reached else None,
+                'target_xyz': self._target_ee_pos[env_idx].detach().cpu().tolist(),
+                'ee_xyz': ee_pos[env_idx].detach().cpu().tolist(),
+                'distance_m': float(distance[env_idx].item()),
+            }
             self._reach_success_history.append(episode_reach_success(reached))
             if reached:
-                self._time_to_reach_history.append(float(self._episode_steps_to_reach[env_idx].item()) * step_dt)
+                self._time_to_reach_history.append(steps * step_dt)
             else:
                 self._time_to_reach_history.append(float(self.max_episode_length) * step_dt)
+
+    def pop_episode_outcome(self, env_idx: int = 0) -> dict[str, Any] | None:
+        """Return terminal episode metrics captured before Isaac Lab auto-reset."""
+
+        return self._terminal_episode_outcomes.pop(env_idx, None)
 
     def _reset_idx(self, env_ids: Sequence[int] | None) -> None:
         if env_ids is None:
@@ -414,9 +450,14 @@ def make_env_cfg(
     robot_usd_path: str | None = None,
     checkpoint_dir: str | None = None,
     seed: int | None = None,
+    target_sampling: str = 'curriculum',
+    episode_length_s: float | None = None,
 ) -> MyCobotReachEnvCfg:
     cfg = MyCobotReachEnvCfg()
     cfg.scene.num_envs = num_envs
+    cfg.target_sampling = target_sampling
+    if episode_length_s is not None:
+        cfg.episode_length_s = episode_length_s
     usd_path = robot_usd_path or str(DEFAULT_ROBOT_USD)
     cfg.robot_usd_path = usd_path
     cfg.robot.spawn.usd_path = usd_path

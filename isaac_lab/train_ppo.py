@@ -58,11 +58,11 @@ def parse_args() -> argparse.Namespace:
         help='Stop after this many minutes (default 30). Set 0 to disable time limit.',
     )
     parser.add_argument(
-        '--verbose',
+        '--motion-glossary',
         action=argparse.BooleanOptionalAction,
         default=True,
-        help='Print tutorial-style MDP/motion glossary and per-iteration motion notes '
-        '(default: on). Use --no-verbose to disable.',
+        help='Print tutorial-style MDP/motion glossary at startup and per-iteration '
+        'motion notes (default: on). Isaac Lab reserves --verbose for kit logging.',
     )
     parser.add_argument(
         '--target-reach-success-rate',
@@ -91,6 +91,35 @@ def parse_args() -> argparse.Namespace:
         '--fixed-iterations',
         action='store_true',
         help='Run exactly --max-iterations instead of stopping on task success.',
+    )
+    parser.add_argument(
+        '--from-scratch',
+        action='store_true',
+        help='Remove existing checkpoints in --checkpoint-dir before training.',
+    )
+    parser.add_argument(
+        '--no-plateau-abort',
+        action='store_true',
+        help='Disable early abort when reach success stops improving.',
+    )
+    parser.add_argument(
+        '--plateau-window-iterations',
+        type=int,
+        default=None,
+        help='Abort if reach success does not improve for this many iterations '
+        '(default from training_defaults).',
+    )
+    parser.add_argument(
+        '--plateau-warmup-iterations',
+        type=int,
+        default=None,
+        help='Iterations before plateau detection activates (default from training_defaults).',
+    )
+    parser.add_argument(
+        '--min-reach-improvement',
+        type=float,
+        default=None,
+        help='Minimum reach-success increase to reset plateau timer (default 0.01).',
     )
     parser.add_argument(
         '--checkpoint-dir',
@@ -129,6 +158,18 @@ def parse_args() -> argparse.Namespace:
         from isaac_lab.mdp_core import DEFAULT_TARGET_REACH_SUCCESS_RATE  # noqa: WPS433
 
         args.target_reach_success_rate = DEFAULT_TARGET_REACH_SUCCESS_RATE
+    if args.plateau_window_iterations is None:
+        from isaac_lab.training_defaults import DEFAULT_PLATEAU_WINDOW_ITERATIONS  # noqa: WPS433
+
+        args.plateau_window_iterations = DEFAULT_PLATEAU_WINDOW_ITERATIONS
+    if args.plateau_warmup_iterations is None:
+        from isaac_lab.training_defaults import DEFAULT_PLATEAU_WARMUP_ITERATIONS  # noqa: WPS433
+
+        args.plateau_warmup_iterations = DEFAULT_PLATEAU_WARMUP_ITERATIONS
+    if args.min_reach_improvement is None:
+        from isaac_lab.training_defaults import DEFAULT_MIN_REACH_IMPROVEMENT  # noqa: WPS433
+
+        args.min_reach_improvement = DEFAULT_MIN_REACH_IMPROVEMENT
     return args
 
 
@@ -188,6 +229,11 @@ def main() -> int:
 
     register_env()
     checkpoint_dir = args.checkpoint_dir.resolve()
+    if args.from_scratch and checkpoint_dir.exists():
+        import shutil
+
+        print(f'--from-scratch: removing {checkpoint_dir}')
+        shutil.rmtree(checkpoint_dir)
     checkpoint_dir.mkdir(parents=True, exist_ok=True)
     log_dir = checkpoint_dir / 'logs'
     log_dir.mkdir(parents=True, exist_ok=True)
@@ -200,7 +246,7 @@ def main() -> int:
     )
     env = EnvClass(cfg=env_cfg)
 
-    if args.verbose and task_mode == 'reach':
+    if args.motion_glossary and task_mode == 'reach':
         from isaac_lab.training_verbose import print_reach_training_guide  # noqa: WPS433
 
         print_reach_training_guide(
@@ -226,6 +272,10 @@ def main() -> int:
         target_reach_success_rate=args.target_reach_success_rate,
         target_push_success_rate=args.target_push_success_rate,
         target_contact_rate=args.target_contact_rate,
+        abort_on_plateau=not args.no_plateau_abort,
+        plateau_warmup_iterations=args.plateau_warmup_iterations,
+        plateau_window_iterations=args.plateau_window_iterations,
+        min_reach_improvement=args.min_reach_improvement,
     )
     runner = OnPolicyRunner(
         env,
@@ -254,7 +304,7 @@ def main() -> int:
         init_at_random_ep_len=True,
         train_until_task_success=not args.fixed_iterations,
         max_duration_s=max_duration_s if not args.fixed_iterations else None,
-        verbose=args.verbose,
+        verbose=args.motion_glossary,
         verbose_curriculum_fn=_curriculum_stage if task_mode == 'reach' else None,
     )
 
@@ -287,9 +337,14 @@ def main() -> int:
         'task': TASK_ID,
         'num_envs': args.num_envs,
         'max_duration_minutes': args.max_duration_minutes,
+        'from_scratch': args.from_scratch,
+        'abort_on_plateau': criteria.abort_on_plateau,
+        'plateau_window_iterations': criteria.plateau_window_iterations,
+        'plateau_warmup_iterations': criteria.plateau_warmup_iterations,
+        'min_reach_improvement': criteria.min_reach_improvement,
         'fixed_iterations': args.fixed_iterations,
         'max_iterations': planned_iterations,
-        'verbose': args.verbose,
+        'motion_glossary': args.motion_glossary,
         'completed_iterations': len(reports),
         'stop_reason': stop_reason,
         'total_execution_s': elapsed_s,
