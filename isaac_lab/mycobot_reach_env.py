@@ -478,12 +478,15 @@ def make_env_cfg(
     seed: int | None = None,
     target_sampling: str = 'curriculum',
     episode_length_s: float | None = None,
+    action_scale: float | None = None,
 ) -> MyCobotReachEnvCfg:
     cfg = MyCobotReachEnvCfg()
     cfg.scene.num_envs = num_envs
     cfg.target_sampling = target_sampling
     if episode_length_s is not None:
         cfg.episode_length_s = episode_length_s
+    if action_scale is not None:
+        cfg.action_scale = action_scale
     usd_path = robot_usd_path or str(DEFAULT_ROBOT_USD)
     cfg.robot_usd_path = usd_path
     cfg.robot.spawn.usd_path = usd_path

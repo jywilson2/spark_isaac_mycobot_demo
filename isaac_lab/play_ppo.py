@@ -39,15 +39,17 @@ apply_training_runtime_env()
 
 
 def resolve_checkpoint_path(checkpoint: Path) -> Path:
+    from isaac_lab.train_ppo import find_newest_checkpoint  # noqa: WPS433
+
     if checkpoint.is_file():
         return checkpoint
     if not checkpoint.is_dir():
         raise FileNotFoundError(f'Checkpoint not found: {checkpoint}')
-    model_files = sorted(checkpoint.glob('model_*.pt'))
-    if not model_files:
+    newest = find_newest_checkpoint(checkpoint)
+    if newest is None:
         raise FileNotFoundError(
-            f'No model_*.pt files under {checkpoint}. Train first with train_ppo.py.')
-    return model_files[-1]
+            f'No checkpoint found under {checkpoint}. Train first with train_ppo.py.')
+    return newest
 
 
 def build_parser(*, with_app_launcher: bool = True) -> argparse.ArgumentParser:
@@ -67,6 +69,13 @@ def build_parser(*, with_app_launcher: bool = True) -> argparse.ArgumentParser:
         help='Policy directory (latest_policy) or model_*.pt file',
     )
     parser.add_argument(
+        '--demo-max-episodes',
+        type=int,
+        default=None,
+        help='Stop continuous demo after N reach attempts (for headless verification). '
+        'GUI demo runs until exit when omitted.',
+    )
+    parser.add_argument(
         '--episodes',
         type=int,
         default=10,
@@ -74,6 +83,12 @@ def build_parser(*, with_app_launcher: bool = True) -> argparse.ArgumentParser:
     )
     parser.add_argument('--num-arms', type=int, default=1)
     parser.add_argument('--seed', type=int, default=7)
+    parser.add_argument(
+        '--policy-mean',
+        action='store_true',
+        help='Use the policy mean action instead of sampling (often more consistent '
+        'at inference when action std is still wide).',
+    )
     parser.add_argument(
         '--robot-usd',
         type=Path,
@@ -83,6 +98,12 @@ def build_parser(*, with_app_launcher: bool = True) -> argparse.ArgumentParser:
         / 'mycobot_280_m5_limo_cobot'
         / 'mycobot_280_m5_limo_cobot'
         / 'mycobot_280_m5_limo_cobot.usda',
+    )
+    parser.add_argument(
+        '--action-scale',
+        type=float,
+        default=None,
+        help='Joint delta scale; should match the value used during training.',
     )
     if with_app_launcher:
         from isaaclab.app import AppLauncher  # noqa: WPS433
@@ -124,15 +145,7 @@ def select_inference_actions(policy: Any, obs: Any, *, stochastic: bool = True) 
         return policy(obs, stochastic_output=stochastic)
 
 
-def consume_episode_outcome(task_env: Any, *, env_idx: int = 0) -> dict[str, Any]:
-    """Read terminal reach metrics captured before DirectRLEnv auto-reset in ``step()``."""
-
-    pop = getattr(task_env, 'pop_episode_outcome', None)
-    if callable(pop):
-        outcome = pop(env_idx)
-        if outcome is not None:
-            return outcome
-    return read_episode_outcome(task_env, env_idx=env_idx)
+def read_episode_outcome(task_env: Any, *, env_idx: int = 0) -> dict[str, Any]:
     """Read reach outcome for one parallel env (fallback when terminal cache is empty)."""
 
     step_dt = float(task_env.cfg.sim.dt * task_env.cfg.decimation)
@@ -148,6 +161,17 @@ def consume_episode_outcome(task_env: Any, *, env_idx: int = 0) -> dict[str, Any
         'ee_xyz': ee,
         'distance_m': distance,
     }
+
+
+def consume_episode_outcome(task_env: Any, *, env_idx: int = 0) -> dict[str, Any]:
+    """Read terminal reach metrics captured before DirectRLEnv auto-reset in ``step()``."""
+
+    pop = getattr(task_env, 'pop_episode_outcome', None)
+    if callable(pop):
+        outcome = pop(env_idx)
+        if outcome is not None:
+            return outcome
+    return read_episode_outcome(task_env, env_idx=env_idx)
 
 
 def format_episode_line(episode: int, outcome: dict[str, Any]) -> str:
@@ -172,6 +196,8 @@ def run_play_loop(
     task_env: Any | None,
     episodes: int,
     demo: bool,
+    demo_max_episodes: int | None = None,
+    stochastic: bool = True,
 ) -> tuple[int, int]:
     """Step the policy until episode limit or simulator exit; return (episodes, successes)."""
 
@@ -193,19 +219,30 @@ def run_play_loop(
     while simulation_app.is_running():
         if not demo and episodes_completed >= episodes:
             break
+        if demo and demo_max_episodes is not None and episodes_completed >= demo_max_episodes:
+            break
         with torch.inference_mode():
-            actions = select_inference_actions(policy, obs, stochastic=True)
+            actions = select_inference_actions(policy, obs, stochastic=stochastic)
         obs, _rewards, dones, _infos = env.step(actions)
         if not torch.any(dones):
             continue
 
-        episodes_completed += 1
         if task_env is not None:
-            outcome = consume_episode_outcome(task_env, env_idx=0)
-            if outcome['reached']:
-                successes += 1
-            print(format_episode_line(episodes_completed, outcome))
+            num_envs = int(getattr(task_env, 'num_envs', 1))
+            for env_idx in range(num_envs):
+                if not bool(dones[env_idx].item()):
+                    continue
+                episodes_completed += 1
+                outcome = consume_episode_outcome(task_env, env_idx=env_idx)
+                if outcome['reached']:
+                    successes += 1
+                print(format_episode_line(episodes_completed, outcome))
+                if not demo and episodes_completed >= episodes:
+                    break
+                if demo and demo_max_episodes is not None and episodes_completed >= demo_max_episodes:
+                    break
         else:
+            episodes_completed += 1
             print(f'Episode {episodes_completed} complete')
 
         # DirectRLEnv already auto-reset inside step(); obs is post-reset for next episode.
@@ -239,7 +276,10 @@ def main() -> int:
         return 1
 
     try:
-        checkpoint_file = resolve_checkpoint_path(args.checkpoint.resolve())
+        checkpoint_arg = args.checkpoint
+        if not checkpoint_arg.is_absolute():
+            checkpoint_arg = (REPO_ROOT / checkpoint_arg).resolve()
+        checkpoint_file = resolve_checkpoint_path(checkpoint_arg)
     except FileNotFoundError as exc:
         print(str(exc), file=sys.stderr)
         simulation_app.close()
@@ -251,7 +291,8 @@ def main() -> int:
         robot_usd_path=str(args.robot_usd.resolve()),
         seed=args.seed,
         target_sampling='demo' if args.demo else 'workspace',
-        episode_length_s=20.0,
+        episode_length_s=30.0,
+        action_scale=args.action_scale,
     )
     env = MyCobotReachEnv(cfg=env_cfg)
 
@@ -280,6 +321,8 @@ def main() -> int:
         task_env=task_env,
         episodes=args.episodes,
         demo=args.demo,
+        demo_max_episodes=args.demo_max_episodes,
+        stochastic=not args.policy_mean,
     )
 
     if args.demo:

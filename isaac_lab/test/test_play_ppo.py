@@ -3,12 +3,21 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 from isaac_lab.play_ppo import (
     build_parser,
     consume_episode_outcome,
     format_episode_line,
     inference_load_cfg,
+    resolve_checkpoint_path,
 )
+
+
+def test_resolve_checkpoint_path_picks_numerically_newest(tmp_path: Path) -> None:
+    for iteration in (100, 999, 1000):
+        (tmp_path / f'model_{iteration}.pt').write_bytes(b'stub')
+    assert resolve_checkpoint_path(tmp_path).name == 'model_1000.pt'
 
 
 def test_parse_args_demo_forces_single_arm() -> None:

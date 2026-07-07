@@ -142,6 +142,46 @@ def test_reach_improvement_tracker_gated_below_min_reach() -> None:
     assert tracker.update(iteration=210, reach_success_rate=0.55) is True
 
 
+def test_reach_improvement_tracker_resets_on_curriculum_stage_change() -> None:
+    """Advancing to a harder stage lowers success by design — not a plateau."""
+
+    from isaac_lab.training_success import _ReachImprovementTracker
+
+    tracker = _ReachImprovementTracker(
+        warmup_iterations=5,
+        plateau_window_iterations=10,
+        min_improvement=0.01,
+        min_reach_to_abort=0.50,
+    )
+    # Learn near_ee up to 92% best.
+    assert not tracker.update(iteration=10, reach_success_rate=0.92, curriculum_stage='near_ee')
+    # Curriculum advances; measured success drops to 65%. Best must reset so the
+    # unbeatable easy-stage 92% cannot trigger the abort on the harder stage.
+    assert not tracker.update(iteration=11, reach_success_rate=0.65, curriculum_stage='medium')
+    assert tracker.best_reach == 0.65
+    # Stalling at 65% within the window keeps training alive...
+    for it in range(12, 21):
+        assert not tracker.update(
+            iteration=it, reach_success_rate=0.65, curriculum_stage='medium',
+        )
+    # ...but a genuine plateau on the same stage still aborts once the window elapses.
+    assert tracker.update(iteration=21, reach_success_rate=0.65, curriculum_stage='medium')
+
+
+def test_reach_improvement_tracker_first_stage_does_not_reset() -> None:
+    from isaac_lab.training_success import _ReachImprovementTracker
+
+    tracker = _ReachImprovementTracker(
+        warmup_iterations=0,
+        plateau_window_iterations=10,
+        min_improvement=0.01,
+    )
+    # First observed stage initializes tracking without wiping progress.
+    assert not tracker.update(iteration=1, reach_success_rate=0.30, curriculum_stage='near_ee')
+    assert tracker.best_reach == 0.30
+    assert tracker.current_stage == 'near_ee'
+
+
 def test_reach_improvement_tracker_resets_on_gain() -> None:
     from isaac_lab.training_success import _ReachImprovementTracker
 

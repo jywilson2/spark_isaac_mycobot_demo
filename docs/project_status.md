@@ -1,12 +1,10 @@
 # Project Status — Return Briefing
 
-Last updated: **2026-07-06** (branch `wip_live_training`)
+Last updated: **2026-07-07** (branch `wip_live_testing`)
 
 This document summarizes **where the project stands** so you can resume after a long break without re-discovering context. For operational commands, see [README.md](../README.md) and [isaac_sim_host_scripts.md](isaac_sim_host_scripts.md).
 
 ## New to this project? Start here
-
-Read these in order if you are joining for the first time:
 
 | Order | Document | Why read it |
 |-------|----------|-------------|
@@ -17,7 +15,7 @@ Read these in order if you are joining for the first time:
 
 ## One-paragraph summary
 
-Mock Phases 1–4 and container tests are green (`colcon test`, 27/27). **Isaac Lab is required and installed** on the host (`~/IsaacLab`, `develop` branch, pinned via `isaac_lab/versions.env`). **Isaac Lab PPO training** runs on the Isaac Sim host via `scripts/host/run_isaac_lab_training.sh train` (Isaac Sim GUI default; `--headless` optional). Each iteration prints explicit stability and task-progress success criteria; training completion reports total execution time.
+Mock Phases 1–4 and container tests are green. **Isaac Lab PPO training** for Phase 2 EE reach runs on the Isaac Sim host via `scripts/host/run_isaac_lab_training.sh train`. After iterative fixes to reward shaping, checkpoint resume, plateau gating, and demo-target fine-tuning, the policy **meets a 95% rolling reach-success target in training** and **97/100 successes in headless demo verification** (single arm, stratified workspace targets, 30 s episodes). Continuous GUI showcase: `./scripts/host/run_isaac_lab_training.sh demo`.
 
 ## Architecture reminder
 
@@ -26,73 +24,109 @@ Mock Phases 1–4 and container tests are green (`colcon test`, 27/27). **Isaac 
 │  HOST (DGX Spark) — REQUIRED for Phase 2 training           │
 │  Isaac Sim 6.x (~/isaacsim) + Isaac Lab (~/IsaacLab)        │
 │  PPO: ./scripts/host/run_isaac_lab_training.sh train        │
+│  Demo: ./scripts/host/run_isaac_lab_training.sh demo        │
 └──────────────────────────┬──────────────────────────────────┘
                            │ ROS 2 (optional live verification)
 ┌──────────────────────────▼──────────────────────────────────┐
 │  Isaac ROS container (Cursor)                                 │
 │  phase1/2 live stacks, colcon test, ROS-bridge smoke tests    │
-└─────────────────────────────────────────────────────────────┘
+└───────────────────────────────────────────────────────────────┘
 ```
 
 ## Completed ✅
 
 | Area | Status | Notes |
 |------|--------|-------|
-| Mock Phase 1–4 | ✅ | `colcon test --packages-select spark_verify_pkg` (27 tests) |
+| Mock Phase 1–4 | ✅ | `colcon test --packages-select spark_verify_pkg` |
 | Isaac Sim scene build | ✅ | `assets/scenes/mycobot_280_m5_limo_cobot.usd` |
-| **Isaac Lab install script** | ✅ | `scripts/host/install_isaac_lab.sh` |
-| **Isaac Lab verify script** | ✅ | `scripts/host/verify_isaac_lab.sh` |
-| **Phase 2 EE reach env** | ✅ | `mycobot_reach_env.py` — random target + red marker, 99% stop criterion |
-| **Phase 6 red-block (opt-in)** | ✅ | `isaac_lab/phase6_red_block/` + `--use-red-block-vision` |
-| **Reach training (2026-07-06)** | Partial | Joint-space runs peaked ~12.5%; Cartesian + DifferentialIK fix applied 2026-07-07 — **retrain on host** |
-| **Isaac Lab PPO trainer** | ✅ | `isaac_lab/train_ppo.py` + `rsl_rl_ppo_cfg.py` |
-| **Isaac Lab unit tests** | ✅ | `isaac_lab/test/test_mdp_contract.py`, `test_detect_isaac_lab.py` |
-| **Training success reporting** | ✅ | Per-iteration criteria + total execution time (`isaac_lab/training_success.py`) |
-| **GUI default training** | ✅ | `run_isaac_lab_training.sh train` uses `--viz kit`; pass `--headless` to disable |
-| **Warning audit policy** | ✅ | Fix meaningful warnings in code; document upstream-only in `docs/isaac_lab_warnings_audit.md` |
-| ROS live Phase 1/2 | ✅ | Live tests auto-skip without sim |
-| ROS-bridge PPO (legacy smoke) | ✅ | `live_ppo_trainer` — not primary training path |
+| Isaac Lab install / verify | ✅ | `scripts/host/install_isaac_lab.sh`, `verify_isaac_lab.sh` |
+| Phase 2 EE reach env | ✅ | Joint-space PPO, curriculum + demo target sampling |
+| Demo / play inference | ✅ | `play_ppo.py` — stochastic actions, terminal outcome cache, 30 s episodes |
+| Host GUI delegation | ✅ | X11 via `spark_host_exec.sh` for `demo` mode |
+| Training success reporting | ✅ | Per-iteration criteria, plateau abort, resume, duration bounds |
+| **Phase 2 reach training (2026-07-07)** | ✅ | **97.7% rolling reach** (demo sampling); **97/100 demo verify** |
 
-## Isaac Lab workflow (required)
+## Development iterations (2026-07-06 — 2026-07-07)
+
+Chronological summary of changes that led to the current working policy:
+
+### 1. Demo mode and host GUI (Jul 6)
+- Fixed X11 forwarding for `nsenter` host delegation (`DISPLAY`, `XAUTHORITY`).
+- Added continuous `demo` mode: single arm, red sphere, stratified workspace targets with minimum separation.
+- Fixed `rsl_rl` checkpoint load API (`load_cfg`); fixed episode outcome reads before DirectRLEnv auto-reset.
+
+### 2. Reward hacking and numerical blow-up (Jul 6–7)
+- **Root cause:** rectified progress reward `max(0, Δd)` let the policy farm reward by oscillating without entering the 25 mm success volume; unbounded actions destabilized PhysX (NaN observations).
+- **Fixes:** signed potential-based shaping `(d_prev − d_now) × scale`; action clamp `[-1, 1]`; NaN observation guard; lower `entropy_coef` (0.005); action-magnitude penalty.
+
+### 3. Plateau abort and curriculum interaction (Jul 7)
+- Gated plateau abort below 50% best reach so slow-starting runs keep their time budget.
+- Reset plateau tracker on curriculum stage change (prevents abort when harder stage lowers rolling success).
+- Default plateau window remains 120 iterations; use `--no-plateau-abort` for full duration runs.
+
+### 4. Checkpoint resume (Jul 7)
+- **`--resume` / `--no-resume` / auto-resume** in `train_ppo.py`.
+- `find_newest_checkpoint()` handles `latest_policy` as a **file**, `logs/model_*.pt` snapshots, and numeric (not lexicographic) sorting.
+- Fixed relative checkpoint paths in `play_ppo.py` (resolve against repo root).
+
+### 5. Demo-target fine-tuning (Jul 7)
+- **`--target-sampling demo`** trains on the same stratified distribution as the GUI showcase (training on curriculum alone reached 95% rolling but only ~85–90% in demo verify).
+- **`--no-early-success-stop`** uses the full `--max-duration-minutes` budget instead of stopping at the first 95% rolling window.
+- **`--episode-length-s 30`** for demo/play (reduces near-miss timeouts at 26–45 mm).
+- **`reach_bonus` raised to 50** (terminal bonus only — proximity bonuses were tried and reverted after reward-hacking regression).
+- Final recipe: resume from curriculum checkpoint → 8-arm demo fine-tune (30 min, no early stop) → 97/100 headless demo successes.
+
+### 6. Play / verify helpers (Jul 7)
+- **`--demo-max-episodes N`** for headless demo regression (100-episode verify gate).
+- **`--policy-mean`** for mean-action inference (optional; stochastic remained better for this policy).
+- Multi-env episode counting in `run_play_loop` when `num_arms > 1`.
+
+## Isaac Lab workflow
 
 | Step | Command |
 |------|---------|
 | Install (once) | `./scripts/host/install_isaac_lab.sh` |
-| Verify | `./scripts/host/verify_isaac_lab.sh` |
-| Train PPO | `./scripts/host/run_isaac_lab_training.sh train --headless` (30 min default, 8 arms) |
-| Check install | `./scripts/host/run_isaac_lab_training.sh check` |
+| Verify | `./scripts/host/run_isaac_lab_training.sh check` |
+| Train (default 30 min, 8 arms) | `./scripts/host/run_isaac_lab_training.sh train --headless` |
+| Train from scratch | `... train --headless --from-scratch --max-duration-minutes 120 --target-reach-success-rate 0.95` |
+| Resume | `... train --headless --resume` (auto-resumes when checkpoint exists) |
+| Demo fine-tune | `... train --headless --resume --target-sampling demo --no-early-success-stop --max-duration-minutes 30 --episode-length-s 30` |
+| **GUI demo** | **`./scripts/host/run_isaac_lab_training.sh demo`** |
+| Headless demo verify | `... play --headless --demo --demo-max-episodes 100 --num-arms 1` |
 
-**Pinning:** `isaac_lab/versions.env` — Isaac Sim 6.x + Isaac Lab `develop` branch + RSL-RL.
+**Checkpoints:** `assets/checkpoints/isaac_lab_ppo/latest_policy` + `logs/model_*.pt` + `training_summary.json` (gitignored).
 
-**Checkpoints:** `assets/checkpoints/isaac_lab_ppo/latest_policy` + `training_summary.json` (gitignored).
+## Execution log (2026-07-07)
 
-## Execution log (2026-07-06)
+| Run | Result |
+|-----|--------|
+| Resume curriculum training (no plateau, 120 min budget) | **95.3% rolling reach**, `stop_reason: task_requirement_met` |
+| Demo verify (pre fine-tune) | 85/100 (curriculum policy on demo targets) |
+| Demo-target fine-tune (8 arm, 30 min × several passes) | Rolling 95–98% on demo sampling |
+| **Final demo verify** | **97/100 reaches (97%)**, 30 s episodes, stochastic inference |
+| Proximity bonus experiment | **Reverted** — reward hacking (48% reach, reward >1200) |
 
-| Run | Environment | Command | Result |
-|-----|-------------|---------|--------|
-| Container unit tests | Container | `colcon test --packages-select spark_verify_pkg` | **27/27 passed** |
-| Isaac Lab install | Host (jywilson) | `./scripts/host/install_isaac_lab.sh` | **Passed** — cloned `~/IsaacLab` (`develop`), linked `_isaac_sim` → `~/isaacsim`, installed `rsl_rl` |
-| Isaac Lab verify | Host | `./scripts/host/install_isaac_lab.sh --verify-only` | **Passed** — imports + headless env smoke (4 steps) |
-| **Contact-push task (2026-07-06)** | Partial | Prior runs ~13% contact with 2D threshold obs; **vision/motion split implemented** — retrain required |
-| **Warning suppression removed** | Repo | Audit + code fixes | Meaningful warnings fixed; upstream-only documented in `docs/isaac_lab_warnings_audit.md` |
-| Isaac Lab branch note | Host | `main` branch | **Failed** — incompatible with Isaac Sim 6.0 (`omni.physics.tensors.impl` missing); use `develop` |
-
-**Training summary sample:**
+**Latest `training_summary.json` snapshot:**
 
 ```json
-{"task": "Spark-MyCobot-PickPlace-Direct-v0", "num_envs": 2, "max_iterations": 8,
- "checkpoint": ".../assets/checkpoints/isaac_lab_ppo/latest_policy",
- "log_dir": ".../assets/checkpoints/isaac_lab_ppo/logs"}
+{
+  "reach_success_rate": 0.9765625,
+  "target_reach_success_rate": 0.98,
+  "target_sampling": "demo",
+  "stop_reason": "max_duration",
+  "task_requirement_met": false
+}
 ```
+
+(`task_requirement_met` is false because the 98% *session* target was not hit before the 30 min cap; rolling reach was 97.7%. Demo verify exceeded the user-facing 95% gate.)
 
 ## Suggested resume checklist
 
 1. Host: `isaac-ros activate` → Cursor → `source scripts/source_container_env.sh`
-2. Host: `./scripts/host/run_isaac_lab_training.sh check` (Isaac Lab must be installed)
-3. If Isaac Lab missing: `./scripts/host/install_isaac_lab.sh`
-4. If robot USD missing: `./scripts/host/iter_build_isaac_scene.sh`
-5. Train: `./scripts/host/run_isaac_lab_training.sh train` (motion policy; vision runs init scan + localization first)
-6. Optional ROS live gate: `./scripts/run_live_sim.sh` + `./scripts/run_live_tests.sh`
+2. `./scripts/host/run_isaac_lab_training.sh check`
+3. **Visual demo:** `./scripts/host/run_isaac_lab_training.sh demo`
+4. Optional re-verify: `./scripts/host/run_isaac_lab_training.sh play --headless --demo --demo-max-episodes 100 --num-arms 1`
+5. Optional ROS live gate: `./scripts/run_live_sim.sh` + `./scripts/run_live_tests.sh`
 
 ## Branch and remote
 

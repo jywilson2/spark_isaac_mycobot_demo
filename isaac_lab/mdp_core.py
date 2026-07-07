@@ -104,7 +104,7 @@ class ReachTaskConfig:
     max_target_z_m: float = MAX_EE_TARGET_Z_M
     action_scale: float = 0.12
     time_penalty: float = 0.02
-    reach_bonus: float = 35.0
+    reach_bonus: float = 50.0
     progress_scale: float = 50.0
     timeout_penalty: float = 5.0
     # Penalty per unit of mean |action| — prefers smooth, low-effort motion and

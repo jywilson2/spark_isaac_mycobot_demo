@@ -494,6 +494,10 @@ class _ReachImprovementTracker:
     The abort signal is gated by ``min_reach_to_abort``: until best reach has
     crossed that threshold the tracker never requests an abort, so early slow
     learning cannot terminate a duration-bounded run prematurely.
+
+    The best-reach reference resets whenever the curriculum stage changes:
+    advancing to a harder stage lowers the measured success rate by design, so
+    a best set on an easier stage must not count the new stage as a plateau.
     """
 
     warmup_iterations: int
@@ -502,9 +506,24 @@ class _ReachImprovementTracker:
     min_reach_to_abort: float = 0.50
     best_reach: float = 0.0
     last_improvement_iteration: int = 0
+    current_stage: str | None = None
 
-    def update(self, *, iteration: int, reach_success_rate: float) -> bool:
+    def update(
+        self,
+        *,
+        iteration: int,
+        reach_success_rate: float,
+        curriculum_stage: str | None = None,
+    ) -> bool:
         """Return True when training should abort due to lack of improvement."""
+
+        if curriculum_stage is not None and curriculum_stage != self.current_stage:
+            stage_changed = self.current_stage is not None
+            self.current_stage = curriculum_stage
+            if stage_changed:
+                self.best_reach = reach_success_rate
+                self.last_improvement_iteration = iteration
+                return False
 
         if iteration < self.warmup_iterations:
             if reach_success_rate > self.best_reach:
@@ -589,17 +608,15 @@ def run_training_with_reports(
         report = evaluate_iteration(metrics, criteria)
         reports.append(report)
         print(report.format())
+        stage = verbose_curriculum_fn() if verbose_curriculum_fn is not None else None
         if verbose and criteria.task_mode == 'reach':
             from isaac_lab.training_verbose import format_iteration_motion_snapshot  # noqa: WPS433
 
-            stage = 'near_ee'
-            if verbose_curriculum_fn is not None:
-                stage = verbose_curriculum_fn()
             print(
                 format_iteration_motion_snapshot(
                     iteration=metrics.iteration,
                     task_metrics=metrics.task_metrics,
-                    curriculum_stage=stage,
+                    curriculum_stage=stage or 'near_ee',
                 )
             )
         if train_until_task_success and report.task_requirement_met:
@@ -620,11 +637,17 @@ def run_training_with_reports(
             and metrics.completed_episodes >= criteria.min_eval_episodes
         ):
             reach_rate = metrics.task_metrics.reach_success_rate
-            if plateau_tracker.update(iteration=metrics.iteration, reach_success_rate=reach_rate):
+            should_abort = plateau_tracker.update(
+                iteration=metrics.iteration,
+                reach_success_rate=reach_rate,
+                curriculum_stage=stage,
+            )
+            if should_abort:
                 stop_reason = 'no_improvement'
                 print(
                     f'\n=== Training plateau detected ===\n'
-                    f'Best reach success: {plateau_tracker.best_reach:.1%}\n'
+                    f'Best reach success: {plateau_tracker.best_reach:.1%} '
+                    f'(curriculum stage: {plateau_tracker.current_stage or "n/a"})\n'
                     f'No improvement >= {criteria.min_reach_improvement:.1%} for '
                     f'{criteria.plateau_window_iterations} iterations '
                     f'(since iteration {plateau_tracker.last_improvement_iteration}).\n'

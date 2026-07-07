@@ -34,6 +34,79 @@ from isaac_lab.warning_filters import apply_training_runtime_env
 apply_training_runtime_env()
 
 
+def latest_model_file(policy_dir: Path) -> Path | None:
+    """Return the numerically newest ``model_<iteration>.pt`` in a policy dir.
+
+    Sorting must be numeric: lexicographic order puts ``model_999.pt`` after
+    ``model_1000.pt`` and would resume from a stale checkpoint.
+    """
+
+    if not policy_dir.is_dir():
+        return None
+
+    def _iteration_of(path: Path) -> int:
+        stem = path.stem.removeprefix('model_')
+        try:
+            return int(stem)
+        except ValueError:
+            return -1
+
+    model_files = [p for p in policy_dir.glob('model_*.pt') if _iteration_of(p) >= 0]
+    if not model_files:
+        return None
+    return max(model_files, key=_iteration_of)
+
+
+def find_newest_checkpoint(checkpoint_dir: Path) -> Path | None:
+    """Locate the best checkpoint under a training run directory.
+
+    rsl_rl may save ``latest_policy`` as a single file *or* as a directory of
+    ``model_<iter>.pt`` snapshots; periodic saves also land in ``logs/``.
+    """
+
+    latest = checkpoint_dir / 'latest_policy'
+    if latest.is_file():
+        return latest
+    if latest.is_dir():
+        found = latest_model_file(latest)
+        if found is not None:
+            return found
+    found = latest_model_file(checkpoint_dir / 'logs')
+    if found is not None:
+        return found
+    return latest_model_file(checkpoint_dir)
+
+
+def resolve_resume_checkpoint(
+    checkpoint_dir: Path,
+    *,
+    from_scratch: bool,
+    resume: bool | None,
+) -> Path | None:
+    """Decide which checkpoint (if any) training should resume from.
+
+    * ``--from-scratch``  — never resume (checkpoints are deleted anyway).
+    * ``--resume``        — require an existing checkpoint; error if missing.
+    * ``--no-resume``     — keep checkpoints on disk but start fresh weights.
+    * default (neither)   — auto: resume from the newest checkpoint when present.
+    """
+
+    if from_scratch:
+        if resume:
+            raise ValueError('--from-scratch and --resume are mutually exclusive.')
+        return None
+    if resume is False:
+        return None
+    newest = find_newest_checkpoint(checkpoint_dir)
+    if newest is None:
+        if resume:
+            raise FileNotFoundError(
+                f'--resume requested but no checkpoint found under {checkpoint_dir}. '
+                'Train first or drop --resume.')
+        return None
+    return newest
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description='Train MyCobot pick-and-place with Isaac Lab PPO')
     parser.add_argument(
@@ -98,6 +171,14 @@ def parse_args() -> argparse.Namespace:
         help='Remove existing checkpoints in --checkpoint-dir before training.',
     )
     parser.add_argument(
+        '--resume',
+        action=argparse.BooleanOptionalAction,
+        default=None,
+        help='Resume weights/optimizer from latest_policy. Default: auto — resume '
+        'when a checkpoint exists. --resume errors if none exists; --no-resume '
+        'starts fresh weights without deleting checkpoints.',
+    )
+    parser.add_argument(
         '--no-plateau-abort',
         action='store_true',
         help='Disable early abort when reach success stops improving.',
@@ -129,6 +210,12 @@ def parse_args() -> argparse.Namespace:
         'floor (default 0.50); below it, training keeps its full time budget.',
     )
     parser.add_argument(
+        '--no-early-success-stop',
+        action='store_true',
+        help='Keep training for the full --max-duration-minutes even after the reach '
+        'target is met (useful for demo fine-tuning).',
+    )
+    parser.add_argument(
         '--checkpoint-dir',
         type=Path,
         default=REPO_ROOT / 'assets' / 'checkpoints' / 'isaac_lab_ppo',
@@ -142,6 +229,25 @@ def parse_args() -> argparse.Namespace:
         / 'mycobot_280_m5_limo_cobot'
         / 'mycobot_280_m5_limo_cobot'
         / 'mycobot_280_m5_limo_cobot.usda',
+    )
+    parser.add_argument(
+        '--episode-length-s',
+        type=float,
+        default=None,
+        help='Episode duration in seconds (default 10 for training, play/demo use 30).',
+    )
+    parser.add_argument(
+        '--target-sampling',
+        choices=('curriculum', 'workspace', 'demo'),
+        default='curriculum',
+        help='Target placement strategy during training. Use ``demo`` to fine-tune '
+        'on the same stratified workspace distribution as the GUI showcase.',
+    )
+    parser.add_argument(
+        '--action-scale',
+        type=float,
+        default=None,
+        help='Joint delta scale (radians per step); lower values encourage precision.',
     )
     parser.add_argument('--seed', type=int, default=42)
 
@@ -240,11 +346,25 @@ def main() -> int:
 
     register_env()
     checkpoint_dir = args.checkpoint_dir.resolve()
+    if args.from_scratch and args.resume:
+        print('--from-scratch and --resume are mutually exclusive.', file=sys.stderr)
+        simulation_app.close()
+        return 1
     if args.from_scratch and checkpoint_dir.exists():
         import shutil
 
         print(f'--from-scratch: removing {checkpoint_dir}')
         shutil.rmtree(checkpoint_dir)
+    try:
+        resume_checkpoint = resolve_resume_checkpoint(
+            checkpoint_dir,
+            from_scratch=args.from_scratch,
+            resume=args.resume,
+        )
+    except FileNotFoundError as exc:
+        print(str(exc), file=sys.stderr)
+        simulation_app.close()
+        return 1
     checkpoint_dir.mkdir(parents=True, exist_ok=True)
     log_dir = checkpoint_dir / 'logs'
     log_dir.mkdir(parents=True, exist_ok=True)
@@ -254,6 +374,9 @@ def main() -> int:
         robot_usd_path=str(args.robot_usd.resolve()),
         checkpoint_dir=str(checkpoint_dir),
         seed=args.seed,
+        target_sampling=args.target_sampling,
+        episode_length_s=args.episode_length_s,
+        action_scale=args.action_scale,
     )
     env = EnvClass(cfg=env_cfg)
 
@@ -295,6 +418,11 @@ def main() -> int:
         log_dir=str(log_dir),
         device=agent_cfg.device,
     )
+    if resume_checkpoint is not None:
+        print(f'Resuming training from checkpoint: {resume_checkpoint}')
+        runner.load(str(resume_checkpoint))
+    else:
+        print('Training with freshly initialized weights (no checkpoint resumed).')
     from isaac_lab.training_defaults import default_max_train_duration_s  # noqa: WPS433
 
     max_duration_s = None
@@ -314,7 +442,7 @@ def main() -> int:
         num_learning_iterations=num_learning_iterations,
         criteria=criteria,
         init_at_random_ep_len=True,
-        train_until_task_success=not args.fixed_iterations,
+        train_until_task_success=not args.fixed_iterations and not args.no_early_success_stop,
         max_duration_s=max_duration_s if not args.fixed_iterations else None,
         verbose=args.motion_glossary,
         verbose_curriculum_fn=_curriculum_stage if task_mode == 'reach' else None,
@@ -350,6 +478,10 @@ def main() -> int:
         'num_envs': args.num_envs,
         'max_duration_minutes': args.max_duration_minutes,
         'from_scratch': args.from_scratch,
+        'resume_checkpoint': str(resume_checkpoint) if resume_checkpoint else None,
+        'target_sampling': args.target_sampling,
+        'no_early_success_stop': args.no_early_success_stop,
+        'episode_length_s': args.episode_length_s,
         'abort_on_plateau': criteria.abort_on_plateau,
         'plateau_window_iterations': criteria.plateau_window_iterations,
         'plateau_warmup_iterations': criteria.plateau_warmup_iterations,

@@ -3,12 +3,84 @@ last_prompt.md
 # The last prompt executed in the Cursor Agent window:
 
 ## BEGIN
+Can you verify that all prompts are saved in last_prompt.md? If any are missing, please add them to the file. I will be using this data to better understand how the functionality of this project evolved during development.
+
+Resume the training from yesterday as you recommended, with a goal of 95%, lower than the previous goal of 99%.
+
+If the training goal is reached (i.e. no abort and and reach percentage is at least 95%), then rerun the demo with the latest weights. Verify that that at least 95% of the random locations are found before the timeout.
+
+If either training or demo mode fail, then speculate on why this may be happening and make changes as you see fit and continue to iterate. Once you finally achieve complete success restate all of the changes made across iterations @docs/project_status.md and commit/push to the remote repo.
+## END
+
+# Old prompts:
+
+## BEGIN
+Fix any issues you identified during training (e.g. the inability to control whether training proceeds from scratch) and report back. Do not resume training until I have had a chance to review your insights.
+## END
+
+## BEGIN
+Please implement 1 through 4.
+
+Commit the changes and push to the remote repo, and include a detailed description of the changes. It is okay to include a copy of the excellent analysis developed from the previous prompt.
+
+Rerun the training from scratch for a maximum of 2 hours.
+
+if the training converges to the target reach of 95% or higher, then rerun in demo mode.
+
+In demo mode, verify that all episodes are executed with success.
+
+Remind me of the command-line used to run demo mode so that I may visualize the result.
+## END
+
+## BEGIN
+Go ahead and implement the second option of gating the pleateau.
+
+Rerun training from scratch for 2 hours.
+
+Run the demo, only if the training target was successfully met, and verify success for all reach attempts.
+
+If any reach failes then analyze the code an propose possible reasons for the issue.
+## END
+
+## BEGIN
+Push the current code to the github repo with a detailed message.
+
+Modify the training code to abort the training sequence early if improvement is not occuring.
+
+Run training from scratch with a target of 99% reach, and a maximum training time of two hours.
+
+Once the training is done, run the demo mode and verify reach occurs before the timeout on all attempts. If not, then return to the code and propose additional changes that may address the issue. In this case, let me study your recommendations before making any additional changes.
+## END
+
+## BEGIN
+Please iterate on the results in demo mode. All attempts to move the EE to the red ball are timing out.
+## END
+
+## BEGIN
+Okay, I noticed that when running the "demo" mode that the position of the ball between each Episode did not vary that much. For demo mode, can you make a change to the random position to assure greater variability?
+## END
+
+## BEGIN
+Regarding the execution of the actuators, does this current simulation accurately portray the physical limitations of the real MyCobot 280 actuators?
+## END
+
+## BEGIN
+I would perfer that target placement function correctly in any position within reach, rather than mask this condition by selecting more distant targets.
+## END
+
+## BEGIN
+What do you mean "force the full Curriculum mode". The demo mode does not perform training and just uses the fully trained network, correct?
+## END
+
+## BEGIN
+Go ahead and run the demo mode option on the host. You will see an error. Please address this.
+## END
+
+## BEGIN
 Can you verify that the current training is not blocked?
 
 Also, can you produce a "demo" command-line option that visualizes the operation of the fully trained arm with the EE moving to the locaiton of a red sphere, that is random repositioned within reach of the arm after each EE reach-to-target. This wouild be used to show-off the fully trained arm in the simulator. Only a single instance of the arm should be loaded and it should continut to run until exited from the command-line.
 ## END
-
-# Old prompts:
 
 ## BEGIN
 The file @last_prompt.md is being updated, but is not retaining old content. Nothing should be deleted from this file. Just add to the beginning, with the most recent entry at the top. Add the latter directive to @spec.md .
