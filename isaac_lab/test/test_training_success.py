@@ -121,6 +121,27 @@ def test_reach_improvement_tracker_detects_plateau() -> None:
     assert tracker.update(iteration=16, reach_success_rate=0.525) is True
 
 
+def test_reach_improvement_tracker_gated_below_min_reach() -> None:
+    from isaac_lab.training_success import _ReachImprovementTracker
+
+    tracker = _ReachImprovementTracker(
+        warmup_iterations=5,
+        plateau_window_iterations=10,
+        min_improvement=0.01,
+        min_reach_to_abort=0.50,
+    )
+    # Stalls at 5% reach for far longer than the plateau window — the gate
+    # must keep training alive because best reach is below the 50% floor.
+    for it in range(1, 200):
+        assert not tracker.update(iteration=it, reach_success_rate=0.05)
+
+    # Once reach crosses the floor and then stalls, the abort fires again.
+    assert not tracker.update(iteration=200, reach_success_rate=0.55)
+    for it in range(201, 210):
+        assert not tracker.update(iteration=it, reach_success_rate=0.55)
+    assert tracker.update(iteration=210, reach_success_rate=0.55) is True
+
+
 def test_reach_improvement_tracker_resets_on_gain() -> None:
     from isaac_lab.training_success import _ReachImprovementTracker
 

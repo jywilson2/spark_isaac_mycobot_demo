@@ -122,6 +122,13 @@ def parse_args() -> argparse.Namespace:
         help='Minimum reach-success increase to reset plateau timer (default 0.01).',
     )
     parser.add_argument(
+        '--plateau-min-reach',
+        type=float,
+        default=None,
+        help='Plateau abort only activates after best reach success crosses this '
+        'floor (default 0.50); below it, training keeps its full time budget.',
+    )
+    parser.add_argument(
         '--checkpoint-dir',
         type=Path,
         default=REPO_ROOT / 'assets' / 'checkpoints' / 'isaac_lab_ppo',
@@ -170,6 +177,10 @@ def parse_args() -> argparse.Namespace:
         from isaac_lab.training_defaults import DEFAULT_MIN_REACH_IMPROVEMENT  # noqa: WPS433
 
         args.min_reach_improvement = DEFAULT_MIN_REACH_IMPROVEMENT
+    if args.plateau_min_reach is None:
+        from isaac_lab.training_defaults import DEFAULT_PLATEAU_MIN_REACH  # noqa: WPS433
+
+        args.plateau_min_reach = DEFAULT_PLATEAU_MIN_REACH
     return args
 
 
@@ -276,6 +287,7 @@ def main() -> int:
         plateau_warmup_iterations=args.plateau_warmup_iterations,
         plateau_window_iterations=args.plateau_window_iterations,
         min_reach_improvement=args.min_reach_improvement,
+        plateau_min_reach=args.plateau_min_reach,
     )
     runner = OnPolicyRunner(
         env,
@@ -342,6 +354,7 @@ def main() -> int:
         'plateau_window_iterations': criteria.plateau_window_iterations,
         'plateau_warmup_iterations': criteria.plateau_warmup_iterations,
         'min_reach_improvement': criteria.min_reach_improvement,
+        'plateau_min_reach': criteria.plateau_min_reach,
         'fixed_iterations': args.fixed_iterations,
         'max_iterations': planned_iterations,
         'motion_glossary': args.motion_glossary,

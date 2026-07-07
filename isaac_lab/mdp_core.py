@@ -107,6 +107,9 @@ class ReachTaskConfig:
     reach_bonus: float = 35.0
     progress_scale: float = 50.0
     timeout_penalty: float = 5.0
+    # Penalty per unit of mean |action| — prefers smooth, low-effort motion and
+    # removes the incentive to grow the exploration std for its own sake.
+    action_penalty: float = 0.05
 
 
 @dataclass(frozen=True)
@@ -454,15 +457,18 @@ def compute_reach_task_reward(
     target_z: float,
     *,
     prev_distance_m: float | None = None,
+    mean_abs_action: float = 0.0,
     cfg: ReachTaskConfig | None = None,
 ) -> tuple[float, float]:
     """Return potential-based reach reward and current EE-to-target distance.
 
-    Shaping uses ``progress_scale * (d_prev - d_now)`` so moving closer always
-    earns positive credit; standing still or moving away earns none. A large
-    terminal ``reach_bonus`` is added only inside ``reach_tolerance_m``. There
-    is no perpetual proximity term — the policy must actually enter the success
-    volume to collect the bonus (see Ng et al. 1999, linked in module docstring).
+    Shaping uses the *signed* difference ``progress_scale * (d_prev - d_now)``:
+    moving closer earns positive credit, moving away costs exactly as much, so
+    oscillating toward/away from the target nets zero (a true potential-based
+    term per Ng et al. 1999 — an earlier rectified ``max(0, ...)`` variant was
+    exploitable by reward farming through oscillation). A large terminal
+    ``reach_bonus`` is added only inside ``reach_tolerance_m``, and a small
+    ``action_penalty * mean_abs_action`` term discourages violent motion.
     """
 
     task = cfg or ReachTaskConfig()
@@ -473,8 +479,8 @@ def compute_reach_task_reward(
     ) ** 0.5
     progress = 0.0
     if prev_distance_m is not None:
-        progress = max(0.0, prev_distance_m - distance) * task.progress_scale
-    reward = progress - task.time_penalty
+        progress = (prev_distance_m - distance) * task.progress_scale
+    reward = progress - task.time_penalty - task.action_penalty * abs(mean_abs_action)
     if distance <= task.reach_tolerance_m:
         reward += task.reach_bonus
     return reward, distance

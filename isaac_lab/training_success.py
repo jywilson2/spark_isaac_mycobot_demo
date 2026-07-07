@@ -83,10 +83,14 @@ class TrainingSuccessCriteria:
     min_eval_episodes: int = 8
 
     # Early abort when reach success stops improving (Phase 2 duration-bounded runs).
+    # The abort is gated: it can only fire once best rolling reach success has
+    # crossed ``plateau_min_reach``, so a slow-starting run keeps its full time
+    # budget instead of being killed at single-digit success rates.
     abort_on_plateau: bool = True
     plateau_warmup_iterations: int = 40
     plateau_window_iterations: int = 120
     min_reach_improvement: float = 0.01
+    plateau_min_reach: float = 0.50
 
 
 @dataclass(frozen=True)
@@ -485,11 +489,17 @@ def _action_std_value(action_std: Any) -> float:
 
 @dataclass
 class _ReachImprovementTracker:
-    """Track best rolling reach success and detect training plateaus."""
+    """Track best rolling reach success and detect training plateaus.
+
+    The abort signal is gated by ``min_reach_to_abort``: until best reach has
+    crossed that threshold the tracker never requests an abort, so early slow
+    learning cannot terminate a duration-bounded run prematurely.
+    """
 
     warmup_iterations: int
     plateau_window_iterations: int
     min_improvement: float
+    min_reach_to_abort: float = 0.50
     best_reach: float = 0.0
     last_improvement_iteration: int = 0
 
@@ -505,6 +515,11 @@ class _ReachImprovementTracker:
         if reach_success_rate > self.best_reach + self.min_improvement:
             self.best_reach = reach_success_rate
             self.last_improvement_iteration = iteration
+            return False
+
+        # Gate: never abort while the policy is still below the reach floor —
+        # give the full time budget to slow-starting runs.
+        if self.best_reach < self.min_reach_to_abort:
             return False
 
         stalled_for = iteration - self.last_improvement_iteration
@@ -554,6 +569,7 @@ def run_training_with_reports(
         warmup_iterations=criteria.plateau_warmup_iterations,
         plateau_window_iterations=criteria.plateau_window_iterations,
         min_improvement=criteria.min_reach_improvement,
+        min_reach_to_abort=criteria.plateau_min_reach,
     )
 
     def wrapped_log(*args: Any, **kwargs: Any) -> None:

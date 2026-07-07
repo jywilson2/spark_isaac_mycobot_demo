@@ -42,6 +42,9 @@ DEFAULT_TRAINING_ITERATION_CHUNK = 100
 DEFAULT_PLATEAU_WARMUP_ITERATIONS = 40
 DEFAULT_PLATEAU_WINDOW_ITERATIONS = 120
 DEFAULT_MIN_REACH_IMPROVEMENT = 0.01
+# Plateau abort is gated: it cannot fire until best reach crosses this floor,
+# so slow-starting runs keep their full --max-duration-minutes budget.
+DEFAULT_PLATEAU_MIN_REACH = 0.50
 
 
 def default_max_train_duration_s(*, minutes: float | None = None) -> float:

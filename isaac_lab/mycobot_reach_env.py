@@ -311,7 +311,10 @@ class MyCobotReachEnv(DirectRLEnv):
         return torch.linalg.vector_norm(ee_pos - self._target_ee_pos, dim=-1)
 
     def _pre_physics_step(self, actions: torch.Tensor) -> None:
-        self.actions = actions.clone()
+        # Bound raw actions so per-step joint deltas never exceed action_scale,
+        # no matter how wide the exploration distribution grows. Unbounded
+        # samples previously drove violent motion that destabilized PhysX.
+        self.actions = torch.clamp(actions, -1.0, 1.0)
 
     def _apply_action(self) -> None:
         """Apply learned joint deltas — the policy is the IK controller (spec.md)."""
@@ -337,7 +340,28 @@ class MyCobotReachEnv(DirectRLEnv):
             [normalized_delta, target_valid, reached_flag, joint_positions],
             dim=-1,
         )
+        obs = self._sanitize_observations(obs)
         return {'policy': obs}
+
+    def _sanitize_observations(self, obs: torch.Tensor) -> torch.Tensor:
+        """Reset any env whose state went non-finite instead of crashing the run.
+
+        A rare PhysX solver blow-up can produce NaN body poses; rsl_rl aborts
+        training on the first NaN observation. Resetting the offending envs
+        costs one episode each and keeps the run alive.
+        """
+
+        bad_envs = (~torch.isfinite(obs)).any(dim=-1).nonzero(as_tuple=False).squeeze(-1)
+        if bad_envs.numel() == 0:
+            return obs
+        print(
+            f'[mycobot_reach_env] WARNING: non-finite observations in '
+            f'{bad_envs.numel()} env(s) — resetting them.',
+        )
+        self._reset_idx(bad_envs)
+        self.scene.write_data_to_sim()
+        obs[bad_envs] = 0.0
+        return torch.nan_to_num(obs, nan=0.0, posinf=0.0, neginf=0.0)
 
     def _get_rewards(self) -> torch.Tensor:
         ee_pos = self._ee_position_base()
@@ -345,6 +369,7 @@ class MyCobotReachEnv(DirectRLEnv):
         if self._prev_distance is None:
             self._prev_distance = distance.detach().clone()
 
+        mean_abs_actions = self.actions.abs().mean(dim=-1)
         rewards = torch.zeros(self.num_envs, device=self.device)
         for env_idx in range(self.num_envs):
             reward, _dist = compute_reach_task_reward(
@@ -355,6 +380,7 @@ class MyCobotReachEnv(DirectRLEnv):
                 target_y=float(self._target_ee_pos[env_idx, 1].item()),
                 target_z=float(self._target_ee_pos[env_idx, 2].item()),
                 prev_distance_m=float(self._prev_distance[env_idx].item()),
+                mean_abs_action=float(mean_abs_actions[env_idx].item()),
                 cfg=self._task_cfg,
             )
             rewards[env_idx] = reward

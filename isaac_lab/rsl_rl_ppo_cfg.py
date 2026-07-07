@@ -44,7 +44,9 @@ class MyCobotPPORunnerCfg(RslRlOnPolicyRunnerCfg):
         value_loss_coef=1.0,
         use_clipped_value_loss=True,
         clip_param=0.2,
-        entropy_coef=0.02,
+        # 0.005 (was 0.02): a large entropy bonus paid a standing dividend for
+        # widening the action distribution, compounding reward-farming noise.
+        entropy_coef=0.005,
         num_learning_epochs=5,
         num_mini_batches=4,
         learning_rate=5.0e-4,

@@ -66,8 +66,11 @@ def test_resolve_gui_env_prefers_host_home_xauthority() -> None:
     xauth = home / '.Xauthority'
     xauth.write_text('dummy', encoding='utf-8')
     try:
+        # Force the native (non-container) branch so the local filesystem is
+        # consulted; in-container resolution goes through nsenter to the host.
         env = _parse_kv_output(
             _bash(
+                'spark_in_isaac_ros_container() { return 1; } && '
                 f'spark_resolve_host_gui_env "{home}"',
                 env={'DISPLAY': ':2', 'XAUTHORITY': ''},
             ),

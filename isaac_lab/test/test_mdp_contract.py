@@ -161,6 +161,56 @@ def test_compute_reach_task_reward_no_proximity_without_progress() -> None:
     assert dist > 0.025
     assert reward_still == -0.02  # time penalty only when standing still
 
+def test_compute_reach_task_reward_moving_away_is_penalized() -> None:
+    """Signed shaping: retreating must cost exactly what approaching earns."""
+
+    from isaac_lab.mdp_core import ReachTaskConfig, compute_reach_task_reward
+
+    cfg = ReachTaskConfig()
+    reward_away, dist = compute_reach_task_reward(
+        0.10, 0.0, 0.12, 0.22, 0.0, 0.12, prev_distance_m=0.07, cfg=cfg,
+    )
+    assert dist > 0.07
+    expected = (0.07 - dist) * cfg.progress_scale - cfg.time_penalty
+    assert abs(reward_away - expected) < 1e-9
+    assert reward_away < 0.0
+
+
+def test_compute_reach_task_reward_oscillation_nets_zero_progress() -> None:
+    """Approach-then-retreat cycles must not farm reward (anti reward hacking)."""
+
+    from isaac_lab.mdp_core import ReachTaskConfig, compute_reach_task_reward
+
+    cfg = ReachTaskConfig()
+    target = (0.22, 0.0, 0.12)
+    far_x, near_x = 0.10, 0.16
+    far_dist = abs(target[0] - far_x)
+    # Step 1: approach from far to near. Step 2: retreat back to far.
+    reward_in, near_dist = compute_reach_task_reward(
+        near_x, 0.0, 0.12, *target, prev_distance_m=far_dist, cfg=cfg,
+    )
+    reward_out, _ = compute_reach_task_reward(
+        far_x, 0.0, 0.12, *target, prev_distance_m=near_dist, cfg=cfg,
+    )
+    total_progress = (reward_in + cfg.time_penalty) + (reward_out + cfg.time_penalty)
+    assert abs(total_progress) < 1e-9
+
+
+def test_compute_reach_task_reward_action_penalty() -> None:
+    from isaac_lab.mdp_core import ReachTaskConfig, compute_reach_task_reward
+
+    cfg = ReachTaskConfig()
+    reward_calm, _ = compute_reach_task_reward(
+        0.15, 0.0, 0.12, 0.22, 0.0, 0.12,
+        prev_distance_m=0.07, mean_abs_action=0.0, cfg=cfg,
+    )
+    reward_violent, _ = compute_reach_task_reward(
+        0.15, 0.0, 0.12, 0.22, 0.0, 0.12,
+        prev_distance_m=0.07, mean_abs_action=1.0, cfg=cfg,
+    )
+    assert reward_violent == reward_calm - cfg.action_penalty
+
+
 def test_resolve_curriculum_stage_advances_with_success() -> None:
     from isaac_lab.mdp_core import resolve_curriculum_stage
 
