@@ -192,6 +192,10 @@ if(BUILD_TESTING)
     ${CMAKE_CURRENT_SOURCE_DIR}/../isaac_lab/test/test_detect_isaac_lab.py
     APPEND_ENV PYTHONPATH=${CMAKE_CURRENT_SOURCE_DIR}/../..
     TIMEOUT 60)
+  ament_add_pytest_test(test_isaac_lab_training_success
+    ${CMAKE_CURRENT_SOURCE_DIR}/../isaac_lab/test/test_training_success.py
+    APPEND_ENV PYTHONPATH=${CMAKE_CURRENT_SOURCE_DIR}/../..
+    TIMEOUT 60)
 
   # Integration tests: add_launch_test runs each file under
   # launch_testing, which starts the mock ecosystem processes and executes

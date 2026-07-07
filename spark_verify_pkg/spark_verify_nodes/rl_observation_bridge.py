@@ -43,18 +43,24 @@ class RlObservationBridgeNode(Node):
         self.declare_parameter('observation_topic', '/mycobot/rl/observation')
         # The mock has no gripper or FK, so end-effector height and grasp
         # state are fixed parameters rather than live estimates.
+        self.declare_parameter('end_effector_x', 0.18)
+        self.declare_parameter('end_effector_y', 0.0)
         self.declare_parameter('end_effector_z', 0.12)
-        self.declare_parameter('is_grasped', False)
+        self.declare_parameter('in_contact', False)
 
         detection_topic = self.get_parameter('detection_topic').get_parameter_value().string_value
         joint_states_topic = (
             self.get_parameter('joint_states_topic').get_parameter_value().string_value)
         observation_topic = (
             self.get_parameter('observation_topic').get_parameter_value().string_value)
+        self._end_effector_x = (
+            self.get_parameter('end_effector_x').get_parameter_value().double_value)
+        self._end_effector_y = (
+            self.get_parameter('end_effector_y').get_parameter_value().double_value)
         self._end_effector_z = (
             self.get_parameter('end_effector_z').get_parameter_value().double_value)
-        self._is_grasped = (
-            self.get_parameter('is_grasped').get_parameter_value().bool_value)
+        self._in_contact = (
+            self.get_parameter('in_contact').get_parameter_value().bool_value)
 
         # The MDP object owns the observation LAYOUT so this node cannot
         # drift out of sync with what the policy was trained on.
@@ -87,16 +93,19 @@ class RlObservationBridgeNode(Node):
         # Also skip frames where the tracker saw no block: the observation
         # layout has no "not detected" encoding, so silence is safer than
         # zeros that look like a block in the top-left corner.
-        if not self._latest_detection.detected:
+        if not self._latest_detection.detected or not self._latest_detection.pose_valid:
             return
 
         observation = self._mdp.build_observation(
-            self._latest_detection.centroid_x,
-            self._latest_detection.centroid_y,
-            list(self._latest_detection.bbox_xyxy),
-            list(self._latest_joint_state.position),
+            self._end_effector_x,
+            self._end_effector_y,
             self._end_effector_z,
-            self._is_grasped,
+            self._latest_detection.target_ee_x,
+            self._latest_detection.target_ee_y,
+            self._latest_detection.target_ee_z,
+            True,
+            list(self._latest_joint_state.position),
+            in_contact=self._in_contact,
         )
 
         message = RlObservation()

@@ -111,12 +111,8 @@ class TestPhase2LiveEcosystem(unittest.TestCase):
         observation = self.observations[-1]
         self.assertEqual(observation.observation_dim, len(observation.observation))
         self.assertEqual(observation.observation_dim, MyCobotPickPlaceMDP.OBSERVATION_DIM)
-        self.assertGreater(observation.observation[0], 0.0)
-        self.assertLess(observation.observation[0], 1.0)
-        self.assertGreater(observation.observation[1], 0.0)
-        self.assertLess(observation.observation[1], 1.0)
-        self.assertLess(observation.observation[2], observation.observation[4])
-        self.assertLess(observation.observation[3], observation.observation[5])
+        self.assertEqual(observation.observation[3], 1.0)
+        self.assertEqual(len(observation.observation), 11)
 
     def test_live_reward_penalizes_safety_violations_before_training(self):
         mdp = MyCobotPickPlaceMDP()

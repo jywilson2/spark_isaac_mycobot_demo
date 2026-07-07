@@ -39,22 +39,37 @@ class BlockVisionTrackerNode(Node):
         self.declare_parameter('rgb_topic', '/mycobot/camera/rgb')
         self.declare_parameter('detection_topic', '/mycobot/vision/block_detection')
         self.declare_parameter('red_threshold', 180)
+        self.declare_parameter('mock_block_base_x', 0.22)
+        self.declare_parameter('mock_block_base_y', 0.0)
+        self.declare_parameter('mock_block_base_z', 0.021)
 
         rgb_topic = self.get_parameter('rgb_topic').get_parameter_value().string_value
         detection_topic = self.get_parameter('detection_topic').get_parameter_value().string_value
         red_threshold = self.get_parameter('red_threshold').get_parameter_value().integer_value
+        mock_block_x = self.get_parameter('mock_block_base_x').get_parameter_value().double_value
+        mock_block_y = self.get_parameter('mock_block_base_y').get_parameter_value().double_value
+        mock_block_z = self.get_parameter('mock_block_base_z').get_parameter_value().double_value
 
         # Create the publisher BEFORE the subscription: the callback fires
         # as soon as a frame arrives, and it must find the publisher ready.
         self._publisher = self.create_publisher(BlockDetection, detection_topic, 10)
         self._red_threshold = red_threshold
+        self._mock_block_x = mock_block_x
+        self._mock_block_y = mock_block_y
+        self._mock_block_z = mock_block_z
         self._subscription = self.create_subscription(Image, rgb_topic, self._on_rgb_frame, 10)
 
     def _on_rgb_frame(self, image: Image) -> None:
         # One detection per frame, even when nothing is found (the message
         # then carries detected=False). Downstream consumers can therefore
         # tell "no block visible" apart from "vision node crashed".
-        detection = to_block_detection(image, red_threshold=self._red_threshold)
+        detection = to_block_detection(
+            image,
+            red_threshold=self._red_threshold,
+            mock_block_x=self._mock_block_x,
+            mock_block_y=self._mock_block_y,
+            mock_block_z=self._mock_block_z,
+        )
         self._publisher.publish(detection)
 
 

@@ -24,7 +24,7 @@ import numpy as np
 
 @dataclass(frozen=True)
 class PpoPolicyConfig:
-    observation_dim: int = 14
+    observation_dim: int = 11
     action_dim: int = 6
     hidden_dim: int = 64
     action_scale: float = 0.05

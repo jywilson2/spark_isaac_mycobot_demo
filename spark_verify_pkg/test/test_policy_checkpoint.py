@@ -28,7 +28,7 @@ from spark_verify_nodes.ppo_policy import PpoPolicy, PpoPolicyConfig
 
 
 def test_checkpoint_round_trip(tmp_path: Path) -> None:
-    policy = PpoPolicy(PpoPolicyConfig(observation_dim=14, action_dim=6, seed=3))
+    policy = PpoPolicy(PpoPolicyConfig(observation_dim=11, action_dim=6, seed=3))
     path = save_policy_checkpoint(
         policy,
         tmp_path / 'policy.json',
@@ -42,7 +42,7 @@ def test_checkpoint_round_trip(tmp_path: Path) -> None:
 
 
 def test_export_onnx_ready_weights(tmp_path: Path) -> None:
-    policy = PpoPolicy(PpoPolicyConfig(observation_dim=14, action_dim=6, seed=4))
+    policy = PpoPolicy(PpoPolicyConfig(observation_dim=11, action_dim=6, seed=4))
     checkpoint = save_policy_checkpoint(
         policy,
         tmp_path / 'policy.json',
@@ -56,5 +56,5 @@ def test_export_onnx_ready_weights(tmp_path: Path) -> None:
     )
     payload = json.loads(export_path.read_text(encoding='utf-8'))
     assert payload['format'] == 'spark_mycobot_ppo_v1'
-    assert payload['observation_dim'] == 14
-    assert len(payload['weights']['w1']) == 14
+    assert payload['observation_dim'] == 11
+    assert len(payload['weights']['w1']) == 11

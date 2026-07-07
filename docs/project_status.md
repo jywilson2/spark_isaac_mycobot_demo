@@ -1,6 +1,6 @@
 # Project Status — Return Briefing
 
-Last updated: **2026-07-06** (branch `wip_live_testing`)
+Last updated: **2026-07-06** (branch `wip_live_training`)
 
 This document summarizes **where the project stands** so you can resume after a long break without re-discovering context. For operational commands, see [README.md](../README.md) and [isaac_sim_host_scripts.md](isaac_sim_host_scripts.md).
 
@@ -17,7 +17,7 @@ Read these in order if you are joining for the first time:
 
 ## One-paragraph summary
 
-Mock Phases 1–4 and container tests are green (`colcon test`, 27/27). **Isaac Lab is required and installed** on the host (`~/IsaacLab`, `develop` branch, pinned via `isaac_lab/versions.env`). **Native Isaac Lab PPO training** runs on the Isaac Sim host via `scripts/host/run_isaac_lab_training.sh train`. The MyCobot DirectRLEnv (`Spark-MyCobot-PickPlace-Direct-v0`) uses the 14-dim MDP contract shared with the ROS verification stack. **PPO training verified** on host (8 iterations, 2 envs, mean reward ≈ 74–123, checkpoint written).
+Mock Phases 1–4 and container tests are green (`colcon test`, 27/27). **Isaac Lab is required and installed** on the host (`~/IsaacLab`, `develop` branch, pinned via `isaac_lab/versions.env`). **Isaac Lab PPO training** runs on the Isaac Sim host via `scripts/host/run_isaac_lab_training.sh train` (Isaac Sim GUI default; `--headless` optional). Each iteration prints explicit stability and task-progress success criteria; training completion reports total execution time.
 
 ## Architecture reminder
 
@@ -42,10 +42,14 @@ Mock Phases 1–4 and container tests are green (`colcon test`, 27/27). **Isaac 
 | Isaac Sim scene build | ✅ | `assets/scenes/mycobot_280_m5_limo_cobot.usd` |
 | **Isaac Lab install script** | ✅ | `scripts/host/install_isaac_lab.sh` |
 | **Isaac Lab verify script** | ✅ | `scripts/host/verify_isaac_lab.sh` |
-| **Isaac Lab DirectRLEnv** | ✅ | `isaac_lab/mycobot_pick_place_env.py` |
+| **Phase 2 EE reach env** | ✅ | `mycobot_reach_env.py` — random target + red marker, 99% stop criterion |
+| **Phase 6 red-block (opt-in)** | ✅ | `isaac_lab/phase6_red_block/` + `--use-red-block-vision` |
+| **Reach training (2026-07-06)** | Partial | 800-iter headless run peaked ~12.5% reach; **99% not yet met** — reward/curriculum tuning ongoing |
 | **Isaac Lab PPO trainer** | ✅ | `isaac_lab/train_ppo.py` + `rsl_rl_ppo_cfg.py` |
 | **Isaac Lab unit tests** | ✅ | `isaac_lab/test/test_mdp_contract.py`, `test_detect_isaac_lab.py` |
-| **Host integration tests** | ✅ | `test_isaac_lab_integration.py` (requires host install) |
+| **Training success reporting** | ✅ | Per-iteration criteria + total execution time (`isaac_lab/training_success.py`) |
+| **GUI default training** | ✅ | `run_isaac_lab_training.sh train` uses `--viz kit`; pass `--headless` to disable |
+| **Warning audit policy** | ✅ | Fix meaningful warnings in code; document upstream-only in `docs/isaac_lab_warnings_audit.md` |
 | ROS live Phase 1/2 | ✅ | Live tests auto-skip without sim |
 | ROS-bridge PPO (legacy smoke) | ✅ | `live_ppo_trainer` — not primary training path |
 
@@ -55,7 +59,7 @@ Mock Phases 1–4 and container tests are green (`colcon test`, 27/27). **Isaac 
 |------|---------|
 | Install (once) | `./scripts/host/install_isaac_lab.sh` |
 | Verify | `./scripts/host/verify_isaac_lab.sh` |
-| Train PPO | `./scripts/host/run_isaac_lab_training.sh train --headless --max-iterations 8 --num-envs 2` |
+| Train PPO | `./scripts/host/run_isaac_lab_training.sh train --max-iterations 8 --num-envs 2` (GUI default) |
 | Check install | `./scripts/host/run_isaac_lab_training.sh check` |
 
 **Pinning:** `isaac_lab/versions.env` — Isaac Sim 6.x + Isaac Lab `develop` branch + RSL-RL.
@@ -69,7 +73,8 @@ Mock Phases 1–4 and container tests are green (`colcon test`, 27/27). **Isaac 
 | Container unit tests | Container | `colcon test --packages-select spark_verify_pkg` | **27/27 passed** |
 | Isaac Lab install | Host (jywilson) | `./scripts/host/install_isaac_lab.sh` | **Passed** — cloned `~/IsaacLab` (`develop`), linked `_isaac_sim` → `~/isaacsim`, installed `rsl_rl` |
 | Isaac Lab verify | Host | `./scripts/host/install_isaac_lab.sh --verify-only` | **Passed** — imports + headless env smoke (4 steps) |
-| **Isaac Lab PPO training** | Host | `run_isaac_lab_training.sh train --headless --max-iterations 8 --num-envs 2` | **Passed** — 8 iterations, 384 steps, mean reward ≈ 74.43, checkpoint at `assets/checkpoints/isaac_lab_ppo/latest_policy` |
+| **Contact-push task (2026-07-06)** | Partial | Prior runs ~13% contact with 2D threshold obs; **vision/motion split implemented** — retrain required |
+| **Warning suppression removed** | Repo | Audit + code fixes | Meaningful warnings fixed; upstream-only documented in `docs/isaac_lab_warnings_audit.md` |
 | Isaac Lab branch note | Host | `main` branch | **Failed** — incompatible with Isaac Sim 6.0 (`omni.physics.tensors.impl` missing); use `develop` |
 
 **Training summary sample:**
@@ -86,7 +91,7 @@ Mock Phases 1–4 and container tests are green (`colcon test`, 27/27). **Isaac 
 2. Host: `./scripts/host/run_isaac_lab_training.sh check` (Isaac Lab must be installed)
 3. If Isaac Lab missing: `./scripts/host/install_isaac_lab.sh`
 4. If robot USD missing: `./scripts/host/iter_build_isaac_scene.sh`
-5. Train: `./scripts/host/run_isaac_lab_training.sh train --headless --max-iterations 20`
+5. Train: `./scripts/host/run_isaac_lab_training.sh train` (motion policy; vision runs init scan + localization first)
 6. Optional ROS live gate: `./scripts/run_live_sim.sh` + `./scripts/run_live_tests.sh`
 
 ## Branch and remote

@@ -2,7 +2,22 @@
 
 ## Project Overview
 
-An automated pipeline simulating the Elephant Robotics MyCobot arm inside NVIDIA Isaac Sim via ROS 2 Jazzy, training a block pick-and-place policy in **NVIDIA Isaac Lab** (required), and porting the policy weights to a physical MyCobot device. The system utilizes visual camera data for block detection and tracking, culminating in a standalone edge deployment using a Raspberry Pi paired with an AI Hat accelerator.
+An automated pipeline simulating the Elephant Robotics MyCobot arm inside NVIDIA Isaac Sim via ROS 2 Jazzy, training an **EE reach-to-target** policy in **NVIDIA Isaac Lab** (Phase 2), and porting weights to a physical MyCobot device. Red-block vision localization and contact-and-push are deferred to **Phase 6** (opt-in only).
+
+### Project objective — tutorial-quality source code
+
+All source code and scripts in this repository **must** contain **verbose inline documentation** so the codebase reads as a **textbook on robotics software development with reinforcement learning**. Comments and docstrings should:
+
+* Explain *why* each design choice exists, not only *what* the code does.
+* Link to **internal documentation** (e.g. [spec.md](spec.md), [README.md](README.md), [docs/project_status.md](docs/project_status.md)).
+* Link to **authoritative external references** where helpful (Isaac Lab, RSL-RL, ROS 2 Jazzy, operational-space control, PPO).
+* Describe how MDP variables (observations, actions, rewards) **translate to physical motion** on the MyCobot arm.
+
+The default training CLI prints a **verbose motion glossary** (`--verbose`, on by default; disable with `--no-verbose`) that mirrors this tutorial intent at runtime.
+
+### Strategic goal — RL for IK, efficient motion, and planning
+
+Phase 2 demonstrates that **inverse kinematics-style reach**, **time-efficient motion**, and rudimentary **motion planning** can be learned by RL **without an analytic IK solver in the policy loop**. The policy acts in **Cartesian task space** (Δx, Δy, Δz); a damped least-squares Jacobian maps task-space commands to joint targets. Phase 2b (obstacles) extends this to planning after Phase 2 reaches **99%** success.
 
 ## Core Tech Stack
 
@@ -12,19 +27,104 @@ An automated pipeline simulating the Elephant Robotics MyCobot arm inside NVIDIA
 * **RL Framework:** RSL-RL (PPO) via Isaac Lab on the Isaac Sim host
 * **Hardware Target:** Elephant Robotics MyCobot 280 (Limo Cobot / `mycobot_280_m5` URDF)
 * **Edge Deployment:** Raspberry Pi (RPi) + AI Hat Board
-* **Perception Hardware:** RPi USB Camera (Optics/Lens specification to be evaluated and selected by the AI based on workspace focal length and FOV requirements).
+* **Perception Hardware:** RPi USB Camera (Phase 6+)
 
-### Isaac Lab requirement
+---
 
-Phase 2 policy training **must** run through Isaac Lab on the Isaac Sim host:
+## Phase 2 — EE reach-to-target (default PPO task)
+
+Phase 2 trains **efficient inverse-kinematics-style arm motion**: move `joint6_flange` to a **known 3D target** in the robot base frame. **No vision. No block contact.**
+
+### Task definition
+
+1. **Randomize target EE position** each episode within the arm reach envelope (annulus 0.12–0.28 m horizontally; Z 0.08–0.22 m).
+2. **Mark the target in simulation** with a visible **red sphere** (visual only — contact with the marker is **not** required).
+3. **Observations (11-dim motion policy):** normalized EE-to-target delta (3), `target_valid` (1), `reached` (1), joint positions (6).
+4. **Actions (3-dim Cartesian):** policy outputs Δx, Δy, Δz in the robot base frame (scaled, clipped). A **damped least-squares Jacobian** maps Cartesian deltas to joint position targets; **soft joint limits** are enforced. This is *not* analytic IK — the policy learns task-space motion; the Jacobian is only a low-level actuator interface (see [isaac_lab/cartesian_actuation.py](isaac_lab/cartesian_actuation.py)).
+5. **Reward:** **potential-based** distance reduction (policy-invariant shaping) + per-step **time penalty** (efficiency) + large **terminal bonus** inside tolerance. No perpetual proximity reward that pays without reaching.
+6. **Curriculum:** staged target sampling — near current EE → medium annulus → full workspace — advancing when rolling success exceeds stage thresholds.
+7. **Success:** EE within **25 mm** of target; episode terminates early on success.
+8. **Training stop:** rolling **reach success rate ≥ 99%** (default) or **`--max-duration-minutes`** (default **30**). Training is **duration-bounded by default**, not iteration-bounded. Use `--fixed-iterations N` only for short smoke tests.
+9. **Verbose CLI:** `--verbose` (default **on**) prints a tutorial glossary of MDP variables and how they map to arm motion; `--no-verbose` disables it.
+
+| Mode | Default arms | Rationale |
+|------|--------------|-----------|
+| **GUI** | **2** | Viewport + marker visualization |
+| **Headless** | **8** | DGX Spark throughput |
+
+### Commands (Phase 2 default)
+
+| Step | Command |
+|------|---------|
+| Train (GUI, 2 arms) | `./scripts/host/run_isaac_lab_training.sh train` |
+| Train (headless, 8 arms) | `./scripts/host/run_isaac_lab_training.sh train --headless` |
+| Play trained policy | `./scripts/host/run_isaac_lab_training.sh play` |
+| Full verify + integration train | `./scripts/host/verify_isaac_lab.sh --smoke-train` |
+
+Cameras are **off** by default for Phase 2 (not required). EE cameras activate only with `--use-red-block-vision` (Phase 6).
+
+---
+
+## Phase 6 — Red-block vision + contact-and-push (opt-in)
+
+Deferred from Phase 2. Enabled **only** with `--use-red-block-vision` (requires `--enable_cameras`).
+
+| Component | Location |
+|-----------|----------|
+| Red threshold detector | `isaac_lab/phase6_red_block/block_vision.py` |
+| Depth → base-frame localization | `isaac_lab/phase6_red_block/block_localization.py` |
+| Init scan sequence | `isaac_lab/phase6_red_block/init_scan.py` |
+| Contact-and-push env | `isaac_lab/phase6_red_block/red_block_env.py` |
+| ROS tracker (mock/live) | `spark_verify_pkg/spark_verify_nodes/block_vision_tracker.py` |
+
+Phase 6 task: locate red block via vision, move EE to target, contact, push 5 mm. Train with:
+
+```bash
+./scripts/host/run_isaac_lab_training.sh train --use-red-block-vision --enable_cameras
+```
+
+---
+
+## PPO integration testing (headless)
+
+| Step | Command |
+|------|---------|
+| Unit tests | `pytest isaac_lab/test/test_mdp_contract.py` |
+| Pytest gate (1 min time-limit slice) | `pytest isaac_lab/test/test_isaac_lab_integration.py` |
+| Full smoke train (30 min, 8 arms) | `./scripts/host/verify_isaac_lab.sh --smoke-train` |
+
+---
+
+## Isaac Lab requirement
 
 | Step | Command |
 |------|---------|
 | Install | `./scripts/host/install_isaac_lab.sh` |
 | Verify | `./scripts/host/verify_isaac_lab.sh` |
-| Train (PPO) | `./scripts/host/run_isaac_lab_training.sh train --headless` |
+| Train | `./scripts/host/run_isaac_lab_training.sh train` |
 
-Isaac Lab is pinned to the Isaac Sim 6.x pre-built binary workflow (`isaac_lab/versions.env`). The ROS container stack remains for live topic verification and sim-to-ROS bridge testing, but **PPO training is not supported without Isaac Lab**.
+---
+
+## Documentation maintenance (required)
+
+Every development session that changes behavior, scripts, or verification results **must** update:
+
+| Document | Purpose |
+|----------|---------|
+| [spec.md](spec.md) | Authoritative requirements |
+| [docs/project_status.md](docs/project_status.md) | Execution log |
+| [last_prompt.md](last_prompt.md) | Append-only user prompt log (see below) |
+| [docs/isaac_lab_warnings_audit.md](docs/isaac_lab_warnings_audit.md) | Warning triage |
+
+### `last_prompt.md` retention policy (required)
+
+When saving the latest user prompt to [last_prompt.md](last_prompt.md):
+
+1. **Never delete** prior prompt entries.
+2. **Prepend** the new prompt at the top (immediately after the file header), so the **most recent prompt is first**.
+3. Move the previous “last prompt” block under the `# Old prompts:` section, preserving all historical `## BEGIN` / `## END` blocks in order.
+
+README and host-script docs should stay aligned with `spec.md` command paths.
 
 ---
 
@@ -32,33 +132,31 @@ Isaac Lab is pinned to the Isaac Sim 6.x pre-built binary workflow (`isaac_lab/v
 
 ### Phase 1: URDF, ROS 2 Control Bridge & Perception inside Isaac Sim
 
-* [x] Parse and ingest `https://github.com/elephantrobotics/mycobot_ros2` asset meshes (`third_party/mycobot_ros2` submodule).
-* [x] Build Isaac Sim standalone environment script mapping ROS 2 `JointState` positions to the MyCobot articulation tree (`isaac_sim/build_mycobot_limo_cobot_scene.py`, `run_mycobot_live_sim.py`).
-* [x] Mount a simulated camera sensor within the Isaac Sim environment oriented toward the manipulator's workspace to provide simulated RGB data (`/World/WorkspaceCamera` → `/mycobot/camera/rgb`).
-* [x] **Verification Requirement:** Automated integration tests for mock and live ROS stacks (`colcon test --packages-select spark_verify_pkg`); live tests auto-skip without Isaac Sim.
+* [x] Parse and ingest mycobot_ros2 assets
+* [x] Build Isaac Sim standalone environment + live sim runner
+* [x] Mount simulated workspace camera
+* [x] Integration tests (mock + live)
 
-### Phase 2: Reinforcement Learning (Isaac Lab Ecosystem)
+### Phase 2: EE Reach PPO (Isaac Lab)
 
-* [x] Define the MDP (Markov Decision Process) environment class (`MyCobotPickPlaceMDP`, `isaac_lab/mdp_core.py`, `IsaacLabMyCobotPickPlaceEnv` for ROS bridge).
-* [x] Integrate visual tracking capabilities so the RL network utilizes camera sensor data for locating the block and estimating grasp poses (`block_vision_tracker`, `rl_observation_bridge`; Isaac Lab env uses block state + joint observations matching the 14-dim contract).
-* [x] Code the reward function targeting visual block tracking, end-effector alignment, grasp state, and vertical lifting (`reward_function.py`, shared with `isaac_lab/mdp_core.py`).
-* [x] **Isaac Lab install & verify scripts** — `scripts/host/install_isaac_lab.sh`, `scripts/host/verify_isaac_lab.sh`, `isaac_lab/detect_isaac_lab.py`.
-* [x] **Isaac Lab DirectRLEnv + PPO trainer** — `isaac_lab/mycobot_pick_place_env.py`, `isaac_lab/train_ppo.py` (RSL-RL PPO on host).
-* [x] **Verification Requirement:** Safety boundary unit tests (`test_safety_boundaries.cpp`, `test_safety_boundary_evaluator_py.py`); vision/observation integration tests (`test_phase2_integration.py`, `test_phase2_live_integration.py`); Isaac Lab unit tests (`isaac_lab/test/test_mdp_contract.py`, `test_detect_isaac_lab.py`, `test_isaac_lab_integration.py`).
+* [x] MDP contract (`isaac_lab/mdp_core.py`) — reachable EE sampling, reach rewards
+* [x] DirectRLEnv (`isaac_lab/mycobot_reach_env.py`) — Cartesian actions, staged curriculum, red marker
+* [x] Cartesian actuation (`isaac_lab/cartesian_actuation.py`) — DLS Jacobian map
+* [x] PPO trainer (`isaac_lab/train_ppo.py`) — duration-bounded train, verbose CLI (default on)
+* [x] Train-until-success loop (`isaac_lab/training_success.py`)
+* [x] Unit + integration tests
+* [ ] **Verify 99% reach success** on DGX Spark headless integration train
 
-### Phase 3: Sim-to-Real Hardware Prep & Model Export
+### Phase 3–4: Sim-to-real & edge deployment
 
-* [x] Export trained neural net policies into edge-optimized ONNX runtime weights suitable for AI Hat hardware acceleration (mock path + `latest_policy_onnx_ready.json` from training checkpoints).
-* [x] Develop native ROS 2 physical deployment drivers mapping inference outputs to `pymycobot` serial commands (`pymycobot_driver`, `edge_deployment_node`).
-* [x] **Verification Requirement:** Mock ONNX harness and driver tests (`test_phase3_integration.py`, `test_mock_onnx_policy.py`).
+* [x] ONNX export path, pymycobot driver, HIL tests
 
-### Phase 4: Standalone Edge Execution & Real-World Hardware Verification
+### Phase 6: Red-block vision + contact-and-push (opt-in)
 
-* [x] Configure the Raspberry Pi and AI Hat board as a standalone, isolated edge deployment unit connected directly to the physical MyCobot arm (mock HIL stack).
-* [x] Evaluate task constraints (working distance, block size, ambient lighting) and output a mathematical recommendation for the most appropriate RPi USB Camera optics/lens (`camera_lens_advisor.py`).
-* [x] Deploy the ONNX model to the AI Hat to execute the RL policy natively on the RPi, deriving motion commands solely from live RPi USB Camera video data (mock HIL).
-* [x] Integrate bare-metal safety overrides (joint velocity limits, collision workspace bounding boxes) into the RPi deployment node to intercept malicious or unstable model inferences.
-* [x] **Verification Requirement:** HIL integration test suite (`test_phase4_hil_integration.py`).
+* [x] Isolated modules under `isaac_lab/phase6_red_block/`
+* [x] `--use-red-block-vision` execution flag
+* [ ] Replace threshold detector with Isaac ROS DNN
+* [ ] Train contact-and-push to spec targets
 
 ---
 
@@ -66,9 +164,7 @@ Isaac Lab is pinned to the Isaac Sim 6.x pre-built binary workflow (`isaac_lab/v
 
 | Artifact | Location |
 |----------|----------|
-| Isaac Lab env + trainer | `isaac_lab/mycobot_pick_place_env.py`, `isaac_lab/train_ppo.py` |
-| Isaac Lab install | `scripts/host/install_isaac_lab.sh` |
-| Scene USD | `assets/scenes/mycobot_280_m5_limo_cobot.usd` |
-| Training checkpoints | `assets/checkpoints/isaac_lab_ppo/` |
-| Live sim runner | `scripts/run_live_sim.sh` |
-| Project status | `docs/project_status.md` |
+| Phase 2 reach env | `isaac_lab/mycobot_reach_env.py` |
+| Phase 6 red-block env | `isaac_lab/phase6_red_block/red_block_env.py` |
+| Trainer | `isaac_lab/train_ppo.py` |
+| Checkpoints | `assets/checkpoints/isaac_lab_ppo/` |

@@ -44,20 +44,18 @@ def run_mock_onnx_inference(observation: Sequence[float]) -> list[float]:
     """
     Map flattened RL observations to target joint angles in radians.
 
-    The observation layout is the contract defined in
+    The observation layout is the motion-policy contract in
     reward_function.build_observation_vector:
-    indices 0-1 centroid, 2-5 bbox, 6 ee height, 7 grasp flag, 8-13 joints.
+    indices 0-2 EE-to-target delta, 3 target_valid, 4 in_contact, 5-10 joints.
     """
-    # Validate at the boundary: a policy fed a wrong-shaped tensor should
-    # fail loudly, not return garbage joint targets.
-    if len(observation) < 8:
-        raise ValueError('Observation vector must include centroid and joint positions')
+    if len(observation) < 5:
+        raise ValueError('Observation vector must include delta and joint positions')
 
     weights = MockPolicyWeights()
-    centroid_x = observation[0]
-    centroid_y = observation[1]
-    # Joint positions start after the 8 perception values (see layout above).
-    joint_start = 8
+    delta_x = observation[0]
+    delta_y = observation[1]
+    delta_z = observation[2]
+    joint_start = 5
     joint_positions = list(observation[joint_start:joint_start + 6])
     # Zero-pad if the caller supplied fewer than 6 joints so the output is
     # always a full 6-DOF command (PolicyInference.joint_targets_rad is a
@@ -65,14 +63,11 @@ def run_mock_onnx_inference(observation: Sequence[float]) -> list[float]:
     if len(joint_positions) < 6:
         joint_positions.extend([0.0] * (6 - len(joint_positions)))
 
-    # A crude visual-servoing rule standing in for the neural network:
-    # steer each joint proportionally to how far the block sits from image
-    # center (0.5, 0.5), scaling the y-error more for distal joints, plus
-    # the fixed bias. Deterministic and differentiable-looking — ideal for
-    # byte-exact serial encoding tests downstream.
+    # Steer joints toward reducing the vision-derived target delta.
     targets = []
     for idx, joint in enumerate(joint_positions[:6]):
-        delta = (centroid_x - 0.5) * weights.centroid_gain
-        delta += (centroid_y - 0.5) * weights.centroid_gain * (idx + 1) * 0.1
+        delta = delta_x * weights.centroid_gain
+        delta += delta_y * weights.centroid_gain * (idx + 1) * 0.1
+        delta += delta_z * weights.centroid_gain * 0.05
         targets.append(joint + delta + weights.joint_bias[idx])
     return targets

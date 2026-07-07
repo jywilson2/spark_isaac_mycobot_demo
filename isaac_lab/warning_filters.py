@@ -12,28 +12,22 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Backward-compatible exports — Phase 2 defaults to EE reach env."""
+"""Minimal runtime environment setup before Isaac Sim / Isaac Lab startup.
 
-from isaac_lab.mycobot_reach_env import (
-    MyCobotReachEnv,
-    MyCobotReachEnvCfg,
-    TASK_ID,
-    make_env_cfg,
-    register_mycobot_env,
-)
+Do not suppress warnings here. Meaningful issues are fixed in code; upstream-only
+messages are documented in docs/isaac_lab_warnings_audit.md.
+"""
 
-# Legacy alias used by older scripts/tests.
-MyCobotPickPlaceEnv = MyCobotReachEnv
-MyCobotPickPlaceEnvCfg = MyCobotReachEnvCfg
+from __future__ import annotations
 
-__all__ = [
-    'MyCobotPickPlaceEnv',
-    'MyCobotPickPlaceEnvCfg',
-    'MyCobotReachEnv',
-    'MyCobotReachEnvCfg',
-    'TASK_ID',
-    'make_env_cfg',
-    'register_mycobot_env',
-]
+import os
 
-register_mycobot_env()
+
+def apply_training_runtime_env() -> None:
+    """Set required Omniverse runtime flags only."""
+
+    os.environ.setdefault('OMNI_KIT_ACCEPT_EULA', 'YES')
+
+
+# Backward-compatible alias used by train_ppo.py imports.
+apply_training_warning_filters = apply_training_runtime_env

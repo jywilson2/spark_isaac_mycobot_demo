@@ -5,7 +5,11 @@
 #   ./scripts/host/run_isaac_lab_training.sh check
 #   ./scripts/host/run_isaac_lab_training.sh install
 #   ./scripts/host/run_isaac_lab_training.sh verify
-#   ./scripts/host/run_isaac_lab_training.sh train [--headless] [--max-iterations N]
+#   ./scripts/host/run_isaac_lab_training.sh train [--headless] [--num-arms N] [--max-duration-minutes M]
+#   ./scripts/host/run_isaac_lab_training.sh play [--checkpoint PATH] [--episodes N]
+#
+# Visualization (Isaac Sim GUI) is the default for train/play. Pass --headless to disable the GUI.
+# Default arms: 2 with GUI, 8 headless (DGX Spark). EE cameras use --enable_cameras (auto).
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -22,6 +26,18 @@ shift || true
 spark_host_apply_env || true
 export ISAACLAB_PATH="${ISAACLAB_PATH:-${SPARK_ISAACLAB_PATH}}"
 export SPARK_REPO_ROOT="${REPO_ROOT}"
+
+spark_ensure_isaac_sim_conda_stub() {
+  local stub="${ISAACLAB_PATH}/_isaac_sim/setup_conda_env.sh"
+  if [[ -L "${ISAACLAB_PATH}/_isaac_sim" || -d "${ISAACLAB_PATH}/_isaac_sim" ]] && [[ ! -f "${stub}" ]]; then
+    cat > "${stub}" <<'EOF'
+#!/usr/bin/env bash
+# Stub for pre-built Isaac Sim installs without bundled conda env.
+return 0 2>/dev/null || exit 0
+EOF
+    chmod +x "${stub}"
+  fi
+}
 
 case "${MODE}" in
   check)
@@ -47,6 +63,7 @@ case "${MODE}" in
     exec "${SCRIPT_DIR}/verify_isaac_lab.sh" "$@"
     ;;
   train)
+    spark_ensure_isaac_sim_conda_stub
     if [[ ! -x "${ISAACLAB_PATH}/isaaclab.sh" ]]; then
       echo "Isaac Lab required. Run: ${REPO_ROOT}/scripts/host/install_isaac_lab.sh" >&2
       exit 1
@@ -55,16 +72,115 @@ case "${MODE}" in
       echo "Robot USD missing. Run: ${REPO_ROOT}/scripts/host/iter_build_isaac_scene.sh" >&2
       exit 1
     fi
+
+    TRAIN_ARGS=()
+    HEADLESS=0
+    VIZ_EXPLICIT=0
+    ENABLE_CAMERAS=0
+    NUM_ARMS_EXPLICIT=0
+    DEFAULT_GUI_ARMS=2
+    DEFAULT_HEADLESS_ARMS=8
+    while [[ $# -gt 0 ]]; do
+      case "$1" in
+        --headless)
+          HEADLESS=1
+          shift
+          ;;
+        --num-arms|--num-envs)
+          NUM_ARMS_EXPLICIT=1
+          TRAIN_ARGS+=("--num-arms" "$2")
+          shift 2
+          ;;
+        --use-red-block-vision)
+          ENABLE_CAMERAS=1
+          TRAIN_ARGS+=("$1")
+          shift
+          ;;
+        --viz|--visualizer)
+          VIZ_EXPLICIT=1
+          if [[ "${2:-}" == "none" ]]; then
+            HEADLESS=1
+          else
+            HEADLESS=0
+          fi
+          TRAIN_ARGS+=("$1" "$2")
+          shift 2
+          ;;
+        *)
+          TRAIN_ARGS+=("$1")
+          shift
+          ;;
+      esac
+    done
+
+    if [[ "${VIZ_EXPLICIT}" -eq 0 ]]; then
+      if [[ "${HEADLESS}" -eq 1 ]]; then
+        TRAIN_ARGS=(--viz none "${TRAIN_ARGS[@]}")
+      else
+        TRAIN_ARGS=(--viz kit "${TRAIN_ARGS[@]}")
+      fi
+    fi
+
+    if [[ "${ENABLE_CAMERAS}" -eq 1 ]]; then
+      TRAIN_ARGS=(--enable_cameras "${TRAIN_ARGS[@]}")
+    fi
+
+    if [[ "${NUM_ARMS_EXPLICIT}" -eq 0 ]]; then
+      if [[ "${HEADLESS}" -eq 1 ]]; then
+        TRAIN_ARGS+=("--num-arms" "${DEFAULT_HEADLESS_ARMS}")
+      else
+        TRAIN_ARGS+=("--num-arms" "${DEFAULT_GUI_ARMS}")
+      fi
+    fi
+
+    export HEADLESS="${HEADLESS}"
     LOG_PATH="${TMPDIR:-/tmp}/spark_isaac_lab_train_$(date +%Y%m%d_%H%M%S).log"
     echo "Training log: ${LOG_PATH}"
+    if [[ "${HEADLESS}" -eq 1 ]]; then
+      echo "Visualization: headless (default ${DEFAULT_HEADLESS_ARMS} arms)"
+    else
+      echo "Visualization: Isaac Sim GUI (default ${DEFAULT_GUI_ARMS} arms)"
+    fi
     (
       cd "${ISAACLAB_PATH}"
       export TERM="${TERM:-xterm-256color}"
-      ./isaaclab.sh -p "${REPO_ROOT}/isaac_lab/train_ppo.py" "$@"
+      ./isaaclab.sh -p "${REPO_ROOT}/isaac_lab/train_ppo.py" "${TRAIN_ARGS[@]}"
     ) 2>&1 | tee -a "${LOG_PATH}"
     ;;
+  play)
+    spark_ensure_isaac_sim_conda_stub
+    if [[ ! -x "${ISAACLAB_PATH}/isaaclab.sh" ]]; then
+      echo "Isaac Lab required. Run: ${REPO_ROOT}/scripts/host/install_isaac_lab.sh" >&2
+      exit 1
+    fi
+    PLAY_ARGS=()
+    HEADLESS=0
+    while [[ $# -gt 0 ]]; do
+      case "$1" in
+        --headless)
+          HEADLESS=1
+          shift
+          ;;
+        *)
+          PLAY_ARGS+=("$1")
+          shift
+          ;;
+      esac
+    done
+    if [[ "${HEADLESS}" -eq 0 ]]; then
+      PLAY_ARGS=(--viz kit --enable_cameras "${PLAY_ARGS[@]}")
+    else
+      PLAY_ARGS=(--headless --viz none --enable_cameras "${PLAY_ARGS[@]}")
+    fi
+    echo "Playing trained policy (GUI default). Each episode randomizes cube spawn."
+    (
+      cd "${ISAACLAB_PATH}"
+      export TERM="${TERM:-xterm-256color}"
+      ./isaaclab.sh -p "${REPO_ROOT}/isaac_lab/play_ppo.py" "${PLAY_ARGS[@]}"
+    )
+    ;;
   *)
-    echo "Usage: $0 {check|install|verify|train} [args...]" >&2
+    echo "Usage: $0 {check|install|verify|train|play} [args...]" >&2
     exit 1
     ;;
 esac

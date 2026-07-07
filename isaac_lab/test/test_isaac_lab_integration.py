@@ -66,5 +66,40 @@ def test_isaac_lab_verify_imports() -> None:
     assert 'Isaac Lab task registered' in result.stdout
 
 
+@pytest.mark.skipif(_isaaclab_launcher() is None, reason='Isaac Lab not installed on host')
+def test_headless_ppo_integration_uses_dgx_spark_arm_default() -> None:
+    """Headless PPO slice: 8 arms, stops on time limit (1 min gate; full run is 30 min)."""
+
+    from isaac_lab.training_defaults import (  # noqa: WPS433
+        DEFAULT_NUM_ARMS_HEADLESS,
+        INTEGRATION_PYTEST_MAX_DURATION_MINUTES,
+    )
+
+    launcher = _isaaclab_launcher()
+    assert launcher is not None
+    result = subprocess.run(
+        [
+            str(launcher),
+            '-p',
+            str(REPO_ROOT / 'isaac_lab' / 'train_ppo.py'),
+            '--headless',
+            '--viz',
+            'none',
+            '--enable_cameras',
+            '--num-arms',
+            str(DEFAULT_NUM_ARMS_HEADLESS),
+            '--max-duration-minutes',
+            str(INTEGRATION_PYTEST_MAX_DURATION_MINUTES),
+        ],
+        capture_output=True,
+        text=True,
+        check=False,
+        cwd=str(launcher.parent),
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert 'Training sequence complete' in result.stdout
+    assert 'max_duration' in result.stdout or '"stop_reason": "max_duration"' in result.stdout
+
+
 if __name__ == '__main__':
     raise SystemExit(pytest.main([__file__, '-q']))

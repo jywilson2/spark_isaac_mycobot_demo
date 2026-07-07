@@ -71,6 +71,17 @@ if [[ "${VERIFY_ONLY}" -eq 0 ]]; then
     ln -sfn "${ISAACSIM_PATH}" "${ISAACLAB_PATH}/_isaac_sim"
   fi
 
+  local conda_stub="${ISAACLAB_PATH}/_isaac_sim/setup_conda_env.sh"
+  if [[ ! -f "${conda_stub}" ]]; then
+    echo "Creating Isaac Sim setup_conda_env.sh stub for pre-built binary installs"
+    cat > "${conda_stub}" <<'EOF'
+#!/usr/bin/env bash
+# Stub for pre-built Isaac Sim installs without bundled conda env.
+return 0 2>/dev/null || exit 0
+EOF
+    chmod +x "${conda_stub}"
+  fi
+
   if ! command -v cmake >/dev/null 2>&1; then
     echo "Installing cmake/build-essential (required by rsl_rl/robomimic deps)..."
     sudo apt-get update -qq
@@ -106,4 +117,4 @@ echo "=== Verify headless env smoke ==="
 ) || exit 1
 
 echo "=== Isaac Lab install verified ==="
-echo "Next: ./scripts/host/run_isaac_lab_training.sh train --headless --max-iterations 10"
+echo "Next: ./scripts/host/run_isaac_lab_training.sh train --max-iterations 10"

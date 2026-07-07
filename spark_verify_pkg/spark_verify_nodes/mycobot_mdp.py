@@ -21,7 +21,7 @@ and receives a REWARD. Isaac Lab environments are built from exactly these
 pieces (observation/action/reward "manager" terms). This class collects the
 project's definitions in one place:
 
-    observation: 14-dim vector (centroid, bbox, ee height, grasp, 6 joints)
+    observation: 11-dim vector (EE delta to target, flags, 6 joints)
     action:      6 joint position targets (radians)
     reward:      shaped terms from reward_function.py minus safety penalty
 
@@ -58,10 +58,8 @@ class MyCobotMdpConfig:
 class MyCobotPickPlaceMDP:
     """Mock MDP used for pre-training safety and observation verification."""
 
-    # 2 centroid + 4 bbox + (1 ee height + 1 grasp flag) + 6 joints = 14.
-    # Class-level constant so tests can assert the wire-format dimension
-    # without instantiating the MDP.
-    OBSERVATION_DIM = 2 + 4 + 2 + len(DEFAULT_JOINT_NAMES)
+    # 3 EE delta + 2 flags + 6 joints = 11.
+    OBSERVATION_DIM = 3 + 2 + len(DEFAULT_JOINT_NAMES)
 
     def __init__(self, config: MyCobotMdpConfig | None = None) -> None:
         # "config or default" lets callers construct MyCobotPickPlaceMDP()
@@ -80,26 +78,28 @@ class MyCobotPickPlaceMDP:
 
     def build_observation(
         self,
-        centroid_x: float,
-        centroid_y: float,
-        bbox_xyxy: Sequence[float],
-        joint_positions: Sequence[float],
+        end_effector_x: float,
+        end_effector_y: float,
         end_effector_z: float,
-        is_grasped: bool,
+        target_ee_x: float,
+        target_ee_y: float,
+        target_ee_z: float,
+        target_valid: bool,
+        joint_positions: Sequence[float],
+        in_contact: bool = False,
     ) -> list[float]:
-        """
-        Flatten task state into the policy's observation layout.
+        """Flatten task state into the motion-policy observation layout."""
 
-        The bool grasp flag becomes a float because neural network inputs
-        are homogeneous float tensors.
-        """
+        delta = [
+            target_ee_x - end_effector_x,
+            target_ee_y - end_effector_y,
+            target_ee_z - end_effector_z,
+        ]
         return build_observation_vector(
-            centroid_x,
-            centroid_y,
-            bbox_xyxy,
+            delta,
+            1.0 if target_valid else 0.0,
+            1.0 if in_contact else 0.0,
             joint_positions,
-            end_effector_z,
-            1.0 if is_grasped else 0.0,
         )
 
     def compute_reward(

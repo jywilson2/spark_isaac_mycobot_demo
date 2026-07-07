@@ -4,6 +4,7 @@
 # Usage:
 #   ./scripts/host/verify_isaac_lab.sh
 #   ./scripts/host/verify_isaac_lab.sh --smoke-env
+#   ./scripts/host/verify_isaac_lab.sh --smoke-train
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -15,10 +16,15 @@ source "${SCRIPT_DIR}/env.isaac_host.sh"
 source "${REPO_ROOT}/isaac_lab/versions.env"
 
 SMOKE_ENV=0
+SMOKE_TRAIN=0
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --smoke-env)
       SMOKE_ENV=1
+      shift
+      ;;
+    --smoke-train)
+      SMOKE_TRAIN=1
       shift
       ;;
     *)
@@ -44,6 +50,7 @@ python3 -m pytest \
   -o "basetemp=${PYTEST_TMPDIR}" \
   "${REPO_ROOT}/isaac_lab/test/test_mdp_contract.py" \
   "${REPO_ROOT}/isaac_lab/test/test_detect_isaac_lab.py" \
+  "${REPO_ROOT}/isaac_lab/test/test_training_defaults.py" \
   -q
 
 echo "=== Host Isaac Lab detect ==="
@@ -62,5 +69,15 @@ fi
 echo "=== Host pytest (integration gate) ==="
 python3 -m pytest -o "basetemp=${PYTEST_TMPDIR}" \
   "${REPO_ROOT}/isaac_lab/test/test_isaac_lab_integration.py" -q
+
+if [[ "${SMOKE_TRAIN}" -eq 1 ]]; then
+  echo "=== Headless PPO integration train (DGX Spark: 8 arms, 30 min default) ==="
+  (
+    cd "${ISAACLAB_PATH}"
+    ./isaaclab.sh -p "${REPO_ROOT}/isaac_lab/train_ppo.py" \
+      --headless --viz none --enable_cameras \
+      --num-arms 8
+  )
+fi
 
 echo "Isaac Lab verification complete."

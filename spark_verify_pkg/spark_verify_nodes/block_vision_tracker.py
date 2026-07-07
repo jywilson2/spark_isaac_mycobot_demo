@@ -30,6 +30,7 @@ ROS running; block_vision_tracker_node.py wraps them into a subscriber.
 from typing import Optional, Tuple
 
 from sensor_msgs.msg import Image
+from spark_verify_nodes.block_localization import localize_mock_block_in_base
 from spark_verify_pkg.msg import BlockDetection
 
 
@@ -97,7 +98,14 @@ def detect_block_in_rgb(
     return bbox, centroid_x, centroid_y
 
 
-def to_block_detection(image: Image, red_threshold: int = 180) -> BlockDetection:
+def to_block_detection(
+    image: Image,
+    red_threshold: int = 180,
+    *,
+    mock_block_x: float = 0.22,
+    mock_block_y: float = 0.0,
+    mock_block_z: float = 0.021,
+) -> BlockDetection:
     """
     Wrap the detector output in the package's BlockDetection message.
 
@@ -118,6 +126,13 @@ def to_block_detection(image: Image, red_threshold: int = 180) -> BlockDetection
         message.centroid_x = 0.0
         message.centroid_y = 0.0
         message.confidence = 0.0
+        message.block_base_x = 0.0
+        message.block_base_y = 0.0
+        message.block_base_z = 0.0
+        message.target_ee_x = 0.0
+        message.target_ee_y = 0.0
+        message.target_ee_z = 0.0
+        message.pose_valid = False
         return message
 
     bbox, centroid_x, centroid_y = detection
@@ -128,4 +143,18 @@ def to_block_detection(image: Image, red_threshold: int = 180) -> BlockDetection
     # The threshold detector is binary, so confidence is 1.0; a neural
     # detector would report its softmax score here.
     message.confidence = 1.0
+    (
+        message.block_base_x,
+        message.block_base_y,
+        message.block_base_z,
+        message.target_ee_x,
+        message.target_ee_y,
+        message.target_ee_z,
+        message.pose_valid,
+    ) = localize_mock_block_in_base(
+        detected=True,
+        mock_block_x=mock_block_x,
+        mock_block_y=mock_block_y,
+        mock_block_z=mock_block_z,
+    )
     return message

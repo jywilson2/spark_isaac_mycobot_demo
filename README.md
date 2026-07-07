@@ -117,7 +117,7 @@ source install/setup.bash
 |----------|---------|------|
 | **A** | Host | `./scripts/run_live_sim.sh` — MyCobot scene + ROS 2 bridge |
 | **B** | Cursor (container) | `ros2 topic hz /clock`, live launch files, integration tests |
-| **C** | Host | `./scripts/host/run_isaac_lab_training.sh train --headless` — **Isaac Lab PPO (required)** |
+| **C** | Host | `./scripts/host/run_isaac_lab_training.sh train` — **Isaac Lab PPO (required, GUI default)** |
 
 Isaac Sim always runs on the **host**. ROS nodes and tests run in the **container** (Cursor).
 
@@ -542,11 +542,19 @@ ros2 launch spark_verify_pkg phase2_mock_ecosystem.launch.py
 Phase 2 policy training **requires Isaac Lab** on the Isaac Sim host. Install once, then train:
 
 ```bash
-# Host terminal
+# Host terminal — GUI default (2 arms, Isaac Sim window open)
 ./scripts/host/install_isaac_lab.sh
 ./scripts/host/verify_isaac_lab.sh
-./scripts/host/run_isaac_lab_training.sh train --headless --max-iterations 20 --num-envs 4
+./scripts/host/run_isaac_lab_training.sh train
+
+# Headless integration / throughput (8 arms on DGX Spark)
+./scripts/host/run_isaac_lab_training.sh train --headless
+
+# Headless PPO integration smoke (CI / pre-merge gate)
+./scripts/host/verify_isaac_lab.sh --smoke-train
 ```
+
+Add `--headless` to disable the Isaac Sim GUI. With visualization enabled, the default is **2 parallel arms** to avoid out-of-memory kills; headless training defaults to **8 arms**.
 
 Prerequisites:
 
@@ -560,6 +568,33 @@ The container `./scripts/run_live_training.sh` redirects to the host Isaac Lab t
 
 Optional ROS live verification (Steps 5–7) remains recommended before deploying trained policies to the live sim bridge.
 
+### Step 10 — Demonstrate the trained policy (locate + push random cube)
+
+After training completes, run the saved policy in the Isaac Sim GUI. Each episode spawns the red cube at a **random position within arm reach**; the arm uses the **EE-mounted camera** to locate the block, makes contact, and pushes it **5 mm in any direction**.
+
+```bash
+# Host terminal — GUI demo (default checkpoint)
+./scripts/host/run_isaac_lab_training.sh play
+
+# More episodes or a specific checkpoint
+./scripts/host/run_isaac_lab_training.sh play --episodes 20 \
+  --checkpoint assets/checkpoints/isaac_lab_ppo/latest_policy
+```
+
+Training prints the same play instructions when it finishes. If `task_requirement_met` is `NO`, the policy may still partially locate or push the cube — retrain or continue training until contact/push targets are met.
+
+### Ongoing use of trained policies
+
+Once you have a checkpoint you are satisfied with:
+
+1. **Demo / regression check** — Re-run `./scripts/host/run_isaac_lab_training.sh play` after code or asset changes to confirm the arm still locates and pushes randomly placed cubes.
+2. **Resume training** — Run `./scripts/host/run_isaac_lab_training.sh train` again; checkpoints overwrite `assets/checkpoints/isaac_lab_ppo/latest_policy` unless you pass `--checkpoint-dir` to a new folder.
+3. **Track quality** — Inspect `assets/checkpoints/isaac_lab_ppo/training_summary.json` for `contact_rate`, `push_success_rate`, and `task_requirement_met`.
+4. **ROS / live sim bridge** — For Phase 2 live topic verification, continue using the ROS stack (Steps 5–7) before deploying weights to hardware or the live sim bridge.
+5. **Edge export** — Phase 3 ONNX export reads from the same checkpoint directory; re-export after retraining.
+
+To archive a good run, copy the whole `assets/checkpoints/isaac_lab_ppo/` directory and pass `--checkpoint` to `play` pointing at the archived `latest_policy` folder.
+
 ### Quick reference checklist
 
 | Step | Where | Action |
@@ -572,7 +607,8 @@ Optional ROS live verification (Steps 5–7) remains recommended before deployin
 | 4 | Cursor | `ros2 topic hz /clock` → non-zero rate |
 | 5 | Cursor | `ros2 launch spark_verify_pkg phase2_live_ecosystem.launch.py` |
 | 6 | Cursor | `./scripts/run_live_tests.sh` — must pass before training |
-| 7 | Host | `./scripts/host/run_isaac_lab_training.sh train --headless` (Step 9) |
+| 7 | Host | `./scripts/host/run_isaac_lab_training.sh train` (Step 9; GUI default 2 arms) |
+| 8 | Host | `./scripts/host/run_isaac_lab_training.sh play` (Step 10 — demo trained policy) |
 
 ### Isaac Sim troubleshooting
 

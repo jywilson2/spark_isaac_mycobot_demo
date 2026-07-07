@@ -107,10 +107,9 @@ class TestPhase2MockEcosystem(unittest.TestCase):
 
         detection = self.detections[-1]
         self.assertTrue(detection.detected)
-        # delta= is unittest's absolute-tolerance float comparison; the
-        # tracker quantizes to pixels so exact equality would be wrong.
-        self.assertAlmostEqual(detection.centroid_x, EXPECTED_CENTROID_X, delta=CENTROID_TOLERANCE)
-        self.assertAlmostEqual(detection.centroid_y, EXPECTED_CENTROID_Y, delta=CENTROID_TOLERANCE)
+        self.assertTrue(detection.pose_valid)
+        self.assertAlmostEqual(detection.block_base_x, 0.22, delta=0.01)
+        self.assertGreater(detection.target_ee_z, detection.block_base_z)
         self.assertEqual(len(detection.bbox_xyxy), 4)
         # Sanity: bbox is (x_min, y_min, x_max, y_max), so min < max.
         self.assertLess(detection.bbox_xyxy[0], detection.bbox_xyxy[2])
@@ -126,14 +125,9 @@ class TestPhase2MockEcosystem(unittest.TestCase):
         # contract the trained policy depends on.
         self.assertEqual(observation.observation_dim, len(observation.observation))
         self.assertEqual(observation.observation_dim, MyCobotPickPlaceMDP.OBSERVATION_DIM)
-        # Layout spot-checks (indices from build_observation_vector):
-        # 0-1 = centroid, 2-5 = bbox (x_min, y_min, x_max, y_max).
-        self.assertAlmostEqual(
-            observation.observation[0], EXPECTED_CENTROID_X, delta=CENTROID_TOLERANCE)
-        self.assertAlmostEqual(
-            observation.observation[1], EXPECTED_CENTROID_Y, delta=CENTROID_TOLERANCE)
-        self.assertLess(observation.observation[2], observation.observation[4])
-        self.assertLess(observation.observation[3], observation.observation[5])
+        # Layout spot-checks: target_valid at index 3, joints start at index 5.
+        self.assertEqual(observation.observation[3], 1.0)
+        self.assertEqual(len(observation.observation), 11)
 
     def test_reward_penalizes_safety_violations_before_training(self):
         # Unit-style test (no topics involved): reward math is deterministic,

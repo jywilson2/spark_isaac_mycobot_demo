@@ -12,28 +12,18 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Backward-compatible exports — Phase 2 defaults to EE reach env."""
+"""Phase 6 — red-block vision localization and contact-and-push (opt-in only)."""
 
-from isaac_lab.mycobot_reach_env import (
-    MyCobotReachEnv,
-    MyCobotReachEnvCfg,
-    TASK_ID,
-    make_env_cfg,
-    register_mycobot_env,
+from isaac_lab.phase6_red_block.red_block_env import (
+    PHASE6_TASK_ID,
+    MyCobotRedBlockEnv,
+    MyCobotRedBlockEnvCfg,
+    register_red_block_env,
 )
 
-# Legacy alias used by older scripts/tests.
-MyCobotPickPlaceEnv = MyCobotReachEnv
-MyCobotPickPlaceEnvCfg = MyCobotReachEnvCfg
-
 __all__ = [
-    'MyCobotPickPlaceEnv',
-    'MyCobotPickPlaceEnvCfg',
-    'MyCobotReachEnv',
-    'MyCobotReachEnvCfg',
-    'TASK_ID',
-    'make_env_cfg',
-    'register_mycobot_env',
+    'PHASE6_TASK_ID',
+    'MyCobotRedBlockEnv',
+    'MyCobotRedBlockEnvCfg',
+    'register_red_block_env',
 ]
-
-register_mycobot_env()

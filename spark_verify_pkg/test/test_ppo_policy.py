@@ -26,7 +26,7 @@ from spark_verify_nodes.ppo_policy import (
 
 
 def test_policy_act_returns_action_value_logprob() -> None:
-    policy = PpoPolicy(PpoPolicyConfig(observation_dim=14, action_dim=6, seed=1))
+    policy = PpoPolicy(PpoPolicyConfig(observation_dim=11, action_dim=6, seed=1))
     observation = [0.5] * 14
     action, value, log_prob = policy.act(observation)
     assert action.shape == (6,)

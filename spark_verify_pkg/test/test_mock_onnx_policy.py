@@ -25,11 +25,9 @@ import pytest
 from spark_verify_nodes.mock_onnx_policy import MockPolicyWeights, run_mock_onnx_inference
 
 
-def build_observation(centroid_x=0.5, centroid_y=0.5, joints=None):
-    # Helper mirroring the observation layout contract from
-    # build_observation_vector: [cx, cy, bbox x4, ee height, grasp, joints].
+def build_observation(delta_x=0.0, delta_y=0.0, delta_z=0.0, joints=None):
     joints = joints if joints is not None else [0.4, -0.2, 0.6, -0.3, 0.5, -0.1]
-    observation = [centroid_x, centroid_y, 0.4, 0.4, 0.6, 0.6, 0.12, 0.0]
+    observation = [delta_x, delta_y, delta_z, 1.0, 0.0]
     observation.extend(joints)
     return observation
 
@@ -43,10 +41,7 @@ def test_inference_is_deterministic_and_six_dof():
     assert first == second
 
 
-def test_centered_block_applies_only_joint_bias():
-    # With the block exactly at image center the centroid error is zero,
-    # so the steering delta vanishes and only the bias term remains —
-    # isolating one term of the policy equation.
+def test_zero_delta_applies_only_joint_bias():
     joints = [0.4, -0.2, 0.6, -0.3, 0.5, -0.1]
     targets = run_mock_onnx_inference(build_observation(joints=joints))
 
@@ -55,16 +50,13 @@ def test_centered_block_applies_only_joint_bias():
         assert target == pytest.approx(joint + bias, abs=1e-9)
 
 
-def test_off_center_block_steers_joint_targets():
-    # Differential test: compare two runs that differ only in centroid_x,
-    # so the assertion isolates the proportional steering term without
-    # needing to know the bias values.
-    centered = run_mock_onnx_inference(build_observation(centroid_x=0.5))
-    off_center = run_mock_onnx_inference(build_observation(centroid_x=0.9))
+def test_nonzero_delta_steers_joint_targets():
+    zero_delta = run_mock_onnx_inference(build_observation(delta_x=0.0))
+    positive_delta = run_mock_onnx_inference(build_observation(delta_x=0.2))
 
     weights = MockPolicyWeights()
-    expected_delta = (0.9 - 0.5) * weights.centroid_gain
-    assert off_center[0] - centered[0] == pytest.approx(expected_delta, abs=1e-9)
+    expected_delta = 0.2 * weights.centroid_gain
+    assert positive_delta[0] - zero_delta[0] == pytest.approx(expected_delta, abs=1e-9)
 
 
 def test_truncated_joint_positions_are_zero_padded():
@@ -79,4 +71,4 @@ def test_truncated_joint_positions_are_zero_padded():
 
 def test_short_observation_raises_value_error():
     with pytest.raises(ValueError):
-        run_mock_onnx_inference([0.5, 0.5, 0.1])
+        run_mock_onnx_inference([0.0, 0.0, 0.0, 1.0])

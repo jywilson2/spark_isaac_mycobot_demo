@@ -21,18 +21,22 @@ from isaaclab_rl.rsl_rl import RslRlMLPModelCfg, RslRlOnPolicyRunnerCfg, RslRlPp
 
 @configclass
 class MyCobotPPORunnerCfg(RslRlOnPolicyRunnerCfg):
-    num_steps_per_env = 24
+    num_steps_per_env = 32
     max_iterations = 20
     save_interval = 10
-    experiment_name = 'mycobot_pick_place'
+    experiment_name = 'mycobot_reach'
+    obs_groups = {
+        'actor': ['policy'],
+        'critic': ['policy'],
+    }
     actor = RslRlMLPModelCfg(
-        hidden_dims=[128, 128],
+        hidden_dims=[256, 256],
         activation='elu',
         obs_normalization=False,
         distribution_cfg=RslRlMLPModelCfg.GaussianDistributionCfg(init_std=1.0),
     )
     critic = RslRlMLPModelCfg(
-        hidden_dims=[128, 128],
+        hidden_dims=[256, 256],
         activation='elu',
         obs_normalization=False,
     )

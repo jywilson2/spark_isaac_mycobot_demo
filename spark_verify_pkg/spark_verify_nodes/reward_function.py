@@ -136,34 +136,29 @@ def compute_total_reward(
 
 
 def build_observation_vector(
-    centroid_x: float,
-    centroid_y: float,
-    bbox_xyxy: Sequence[float],
+    ee_to_target_delta: Sequence[float],
+    target_valid: float,
+    in_contact: float,
     joint_positions: Iterable[float],
-    end_effector_z: float,
-    is_grasped: float,
 ) -> list[float]:
     """
-    Flatten the MDP state into the fixed observation layout.
+    Flatten the motion-policy state into the fixed observation layout.
 
-    The policy network consumes a flat float vector, so the ORDER here is a
-    binding contract shared by the RL bridge, the mock ONNX policy (which
-    reads joints starting at index 8), and the tests:
+    The policy network consumes a flat float vector:
 
-        index 0-1 : block centroid (normalized image coords)
-        index 2-5 : block bounding box x_min, y_min, x_max, y_max
-        index 6   : end-effector height (m)
-        index 7   : grasp flag (0.0 / 1.0)
-        index 8-13: six joint positions (rad)
+        index 0-2 : EE-to-target delta (m, normalized by max reach in trainer)
+        index 3   : target_valid flag (0.0 / 1.0)
+        index 4   : in_contact flag (0.0 / 1.0)
+        index 5-10: six joint positions (rad)
 
     Changing this layout invalidates any previously-trained policy weights.
     """
     observation = [
-        centroid_x,
-        centroid_y,
-        *bbox_xyxy,
-        end_effector_z,
-        is_grasped,
+        float(ee_to_target_delta[0]),
+        float(ee_to_target_delta[1]),
+        float(ee_to_target_delta[2]),
+        float(target_valid),
+        float(in_contact),
     ]
     observation.extend(float(value) for value in joint_positions)
     return observation

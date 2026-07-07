@@ -12,28 +12,19 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Backward-compatible exports — Phase 2 defaults to EE reach env."""
+"""Unit tests for verbose training console output."""
 
-from isaac_lab.mycobot_reach_env import (
-    MyCobotReachEnv,
-    MyCobotReachEnvCfg,
-    TASK_ID,
-    make_env_cfg,
-    register_mycobot_env,
-)
+from __future__ import annotations
 
-# Legacy alias used by older scripts/tests.
-MyCobotPickPlaceEnv = MyCobotReachEnv
-MyCobotPickPlaceEnvCfg = MyCobotReachEnvCfg
+from isaac_lab.training_verbose import format_reach_motion_glossary
 
-__all__ = [
-    'MyCobotPickPlaceEnv',
-    'MyCobotPickPlaceEnvCfg',
-    'MyCobotReachEnv',
-    'MyCobotReachEnvCfg',
-    'TASK_ID',
-    'make_env_cfg',
-    'register_mycobot_env',
-]
 
-register_mycobot_env()
+def test_verbose_glossary_mentions_cartesian_actions() -> None:
+    text = format_reach_motion_glossary(
+        num_envs=8,
+        max_duration_minutes=30.0,
+        target_reach_success_rate=0.99,
+    )
+    assert 'Δx, Δy, Δz' in text
+    assert 'curriculum' in text.lower()
+    assert '30.0 min' in text

@@ -62,16 +62,21 @@ class IsaacLabMyCobotPickPlaceEnv:
         self,
         detection: BlockDetection,
         joint_positions: list[float],
+        end_effector_x: float,
+        end_effector_y: float,
         end_effector_z: float,
-        is_grasped: bool,
+        in_contact: bool = False,
     ) -> list[float]:
         return self._mdp.build_observation(
-            detection.centroid_x,
-            detection.centroid_y,
-            list(detection.bbox_xyxy),
-            joint_positions,
+            end_effector_x,
+            end_effector_y,
             end_effector_z,
-            is_grasped,
+            detection.target_ee_x,
+            detection.target_ee_y,
+            detection.target_ee_z,
+            detection.pose_valid,
+            joint_positions,
+            in_contact=in_contact,
         )
 
     def step_from_live_messages(
@@ -96,8 +101,10 @@ class IsaacLabMyCobotPickPlaceEnv:
         observation = self.build_observation_from_messages(
             detection,
             joint_positions,
+            end_effector_x,
+            end_effector_y,
             end_effector_z,
-            is_grasped,
+            in_contact=is_grasped,
         )
         reward = self._mdp.compute_reward(
             centroid_x=detection.centroid_x,
