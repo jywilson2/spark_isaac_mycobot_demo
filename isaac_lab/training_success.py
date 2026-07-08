@@ -30,7 +30,7 @@ from isaac_lab.mdp_core import (
 
 def compute_max_episode_steps(
     *,
-    episode_length_s: float = 12.0,
+    episode_length_s: float = 30.0,
     sim_dt: float = 1.0 / 60.0,
     decimation: int = 2,
 ) -> int:
@@ -42,7 +42,7 @@ def compute_max_episode_return(
     *,
     max_step_reward: float = 4.0,
     max_episode_steps: int | None = None,
-    episode_length_s: float = 12.0,
+    episode_length_s: float = 30.0,
     sim_dt: float = 1.0 / 60.0,
     decimation: int = 2,
 ) -> float:
@@ -86,7 +86,7 @@ class TrainingSuccessCriteria:
     # The abort is gated: it can only fire once best rolling reach success has
     # crossed ``plateau_min_reach``, so a slow-starting run keeps its full time
     # budget instead of being killed at single-digit success rates.
-    abort_on_plateau: bool = True
+    abort_on_plateau: bool = False
     plateau_warmup_iterations: int = 40
     plateau_window_iterations: int = 120
     min_reach_improvement: float = 0.01

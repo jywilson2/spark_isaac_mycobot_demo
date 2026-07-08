@@ -19,6 +19,12 @@ The default training CLI prints a **verbose motion glossary** (`--motion-glossar
 
 Phase 2 demonstrates that **inverse kinematics-style reach**, **time-efficient motion**, and rudimentary **motion planning** are **learned by the RL policy** — not delegated to analytic, numeric, or differential IK solvers. The PPO network maps observations (EE-to-target vector + joint state) to **joint position deltas**; coordinating those deltas so the flange reaches a 3D target *is* the learned IK. Phase 2b (obstacles) extends this to planning after Phase 2 reaches **99%** success.
 
+The implementation must remain **sufficiently generic** to train a policy that transfers to a **physical MyCobot 280** in arbitrary reach scenarios: full-workspace target sampling, curriculum → demo fine-tune, and validation at multiple episode horizons — not a single scripted pose.
+
+### Smooth motion (required)
+
+Arm actuation must **not stutter**. Training and inference apply **EMA-smoothed joint deltas** plus **jerk penalties** in the reward so motions ramp up and down smoothly. **Smooth, wear-conscious motion is more important than minimizing episode duration** — longer horizons are acceptable when they improve servo-friendly trajectories.
+
 ### Host vs container execution (required)
 
 | Runtime | Runs Isaac Sim / Isaac Lab? | How agents and scripts execute |
@@ -53,12 +59,15 @@ Phase 2 trains **efficient inverse-kinematics-style arm motion**: move `joint6_f
 1. **Randomize target EE position** each episode within the arm reach envelope (annulus 0.12–0.28 m horizontally; Z 0.08–0.22 m).
 2. **Mark the target in simulation** with a visible **red sphere** (visual only — contact with the marker is **not** required).
 3. **Observations (11-dim motion policy):** normalized EE-to-target delta (3), `target_valid` (1), `reached` (1), joint positions (6).
-4. **Actions (6-dim joint space):** policy outputs **joint position deltas** (Δq, one per revolute joint), scaled and clipped; **soft joint limits** enforced. **No IK solver** (analytic, numeric, differential, or Jacobian pseudoinverse) may appear in the control loop — the policy *is* the learned IK mapping.
-5. **Reward:** **potential-based** distance reduction + per-step **time penalty** + large **terminal bonus** inside tolerance.
+4. **Actions (6-dim joint space):** policy outputs **joint position deltas** (Δq, one per revolute joint), scaled and clipped; **soft joint limits** enforced. Raw actions are **EMA-smoothed** before application; a **jerk penalty** discourages abrupt step-to-step changes. **No IK solver** (analytic, numeric, differential, or Jacobian pseudoinverse) may appear in the control loop — the policy *is* the learned IK mapping.
+5. **Reward:** **potential-based** distance reduction + per-step **time penalty** + **action-magnitude** and **jerk** penalties + large **terminal bonus** inside tolerance.
 6. **Curriculum:** staged target sampling — near current EE → medium annulus → full workspace.
 7. **Success:** EE within **25 mm**; early terminate on success.
-8. **Training stop:** rolling **reach success rate ≥ 99%** or **`--max-duration-minutes`** (default **30**).
-9. **Motion glossary CLI:** `--motion-glossary` (default **on**) prints MDP/motion tutorial output; `--no-motion-glossary` disables. (Isaac Lab reserves `--verbose` for kit logging.)
+8. **Episode length:** default **30 s** for training **and** demo/play (shared constant in `isaac_lab/training_defaults.py`).
+9. **Training stop:** rolling **reach success rate ≥ target** (default **99%**; two-phase recipe uses **95%**) or **`--max-duration-minutes`** (default **30**). **Plateau abort is opt-in** (`--plateau-abort`); default is **off** so the duration budget is primary.
+10. **Two-phase training (recommended):** `./scripts/run_two_phase_training.sh` — Phase A curriculum from scratch, Phase B demo-target fine-tune, then multi-horizon demo verify.
+11. **Demo validation:** after training, **demo mode** is the acceptance gate. Verify with `./scripts/verify_demo_policy.sh` at **20 s, 30 s, and 40 s** episode lengths; each must retain **≥ 95%** reach success.
+12. **Motion glossary CLI:** `--motion-glossary` (default **on**) prints MDP/motion tutorial output; `--no-motion-glossary` disables. (Isaac Lab reserves `--verbose` for kit logging.)
 
 | Mode | Default arms | Rationale |
 |------|--------------|-----------|
@@ -71,8 +80,10 @@ Phase 2 trains **efficient inverse-kinematics-style arm motion**: move `joint6_f
 |------|---------|
 | Train (GUI, 2 arms) | `./scripts/host/run_isaac_lab_training.sh train` |
 | Train (headless, 8 arms) | `./scripts/host/run_isaac_lab_training.sh train --headless` |
+| **Two-phase train + verify** | `./scripts/host/run_isaac_lab_training.sh two-phase --headless` |
 | Play trained policy | `./scripts/host/run_isaac_lab_training.sh play` |
 | **Continuous GUI demo** (1 arm, until exit) | `./scripts/host/run_isaac_lab_training.sh demo` |
+| **Demo regression (20/30/40 s)** | `./scripts/host/run_isaac_lab_training.sh verify-demo --headless` |
 | Full verify + integration train | `./scripts/host/verify_isaac_lab.sh --smoke-train` |
 
 Cameras are **off** by default for Phase 2 (not required). EE cameras activate only with `--use-red-block-vision` (Phase 6).
@@ -121,14 +132,17 @@ Phase 6 task: locate red block via vision, move EE to target, contact, push 5 mm
 
 ## Documentation maintenance (required)
 
-Every development session that changes behavior, scripts, or verification results **must** update:
+Every **commit** that changes behavior, scripts, training recipes, or verification results **must** update **all** of:
 
 | Document | Purpose |
 |----------|---------|
-| [spec.md](spec.md) | Authoritative requirements |
-| [docs/project_status.md](docs/project_status.md) | Execution log |
+| [spec.md](spec.md) | Authoritative requirements (this file) |
+| [README.md](README.md) | **Phase in development** — latest committed change, what changed, and why |
+| [docs/project_status.md](docs/project_status.md) | Operational status after each commit (training/demo gates, blockers) |
 | [last_prompt.md](last_prompt.md) | Append-only user prompt log (see below) |
-| [docs/isaac_lab_warnings_audit.md](docs/isaac_lab_warnings_audit.md) | Warning triage |
+| [docs/isaac_lab_warnings_audit.md](docs/isaac_lab_warnings_audit.md) | Warning triage (when warnings change) |
+
+README and `project_status.md` are **not optional** — they must reflect the same commit as the code change.
 
 ### `last_prompt.md` retention policy (required)
 
@@ -157,9 +171,11 @@ README and host-script docs should stay aligned with `spec.md` command paths.
 * [x] DirectRLEnv (`isaac_lab/mycobot_reach_env.py`) — joint-space RL (learned IK), curriculum, red marker
 * [x] Host auto-delegate (`scripts/host/spark_host_exec.sh`) — container → host via `nsenter`
 * [x] PPO trainer (`isaac_lab/train_ppo.py`) — duration-bounded train, verbose CLI (default on)
+* [x] Two-phase training script (`scripts/run_two_phase_training.sh`) + demo verify (`scripts/verify_demo_policy.sh`)
+* [x] Smooth motion — EMA action smoothing + jerk penalty in reach reward
 * [x] Train-until-success loop (`isaac_lab/training_success.py`)
 * [x] Unit + integration tests
-* [ ] **Verify 99% reach success** on DGX Spark headless integration train
+* [ ] **Verify ≥ 95% reach** at 20/30/40 s demo horizons on DGX Spark headless two-phase train
 
 ### Phase 3–4: Sim-to-real & edge deployment
 

@@ -38,7 +38,19 @@ INTEGRATION_TRAIN_MAX_ITERATIONS = 2
 # PPO learns in chunks; the outer loop runs until duration or task success.
 DEFAULT_TRAINING_ITERATION_CHUNK = 100
 
-# Abort when rolling reach success stalls (see TrainingSuccessCriteria).
+# Training and demo/play share the same episode horizon (spec.md § smooth motion).
+DEFAULT_EPISODE_LENGTH_S = 30.0
+
+# Two-phase training recipe (scripts/run_two_phase_training.sh).
+TWO_PHASE_CURRICULUM_MINUTES = 90.0
+TWO_PHASE_DEMO_MINUTES = 30.0
+TWO_PHASE_TARGET_REACH_SUCCESS_RATE = 0.95
+DEMO_VERIFY_EPISODE_LENGTHS_S: tuple[float, ...] = (20.0, 30.0, 40.0)
+DEMO_VERIFY_MIN_SUCCESS_RATE = 0.95
+DEMO_VERIFY_EPISODES = 100
+
+# Plateau abort is opt-in; duration budget is the primary stop (spec.md).
+DEFAULT_ABORT_ON_PLATEAU = False
 DEFAULT_PLATEAU_WARMUP_ITERATIONS = 40
 DEFAULT_PLATEAU_WINDOW_ITERATIONS = 120
 DEFAULT_MIN_REACH_IMPROVEMENT = 0.01

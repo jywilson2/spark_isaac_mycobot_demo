@@ -110,6 +110,11 @@ class ReachTaskConfig:
     # Penalty per unit of mean |action| — prefers smooth, low-effort motion and
     # removes the incentive to grow the exploration std for its own sake.
     action_penalty: float = 0.05
+    # Penalize abrupt changes in commanded joint deltas (jerk) — smooth accel/decel
+    # matters more than raw speed for real MyCobot servos (spec.md).
+    jerk_penalty: float = 0.08
+    # EMA blend for raw actions: higher = more responsive, lower = smoother motion.
+    action_smoothing_alpha: float = 0.35
 
 
 @dataclass(frozen=True)
@@ -458,6 +463,7 @@ def compute_reach_task_reward(
     *,
     prev_distance_m: float | None = None,
     mean_abs_action: float = 0.0,
+    mean_action_jerk: float = 0.0,
     cfg: ReachTaskConfig | None = None,
 ) -> tuple[float, float]:
     """Return potential-based reach reward and current EE-to-target distance.
@@ -465,10 +471,8 @@ def compute_reach_task_reward(
     Shaping uses the *signed* difference ``progress_scale * (d_prev - d_now)``:
     moving closer earns positive credit, moving away costs exactly as much, so
     oscillating toward/away from the target nets zero (a true potential-based
-    term per Ng et al. 1999 — an earlier rectified ``max(0, ...)`` variant was
-    exploitable by reward farming through oscillation). A large terminal
-    ``reach_bonus`` is added only inside ``reach_tolerance_m``, and a small
-    ``action_penalty * mean_abs_action`` term discourages violent motion.
+    term per Ng et al. 1999). Terminal ``reach_bonus`` applies inside tolerance.
+  Small ``action_penalty`` and ``jerk_penalty`` terms discourage stuttery motion.
     """
 
     task = cfg or ReachTaskConfig()
@@ -480,7 +484,12 @@ def compute_reach_task_reward(
     progress = 0.0
     if prev_distance_m is not None:
         progress = (prev_distance_m - distance) * task.progress_scale
-    reward = progress - task.time_penalty - task.action_penalty * abs(mean_abs_action)
+    reward = (
+        progress
+        - task.time_penalty
+        - task.action_penalty * abs(mean_abs_action)
+        - task.jerk_penalty * abs(mean_action_jerk)
+    )
     if distance <= task.reach_tolerance_m:
         reward += task.reach_bonus
     return reward, distance

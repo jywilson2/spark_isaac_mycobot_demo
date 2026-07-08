@@ -179,9 +179,10 @@ def parse_args() -> argparse.Namespace:
         'starts fresh weights without deleting checkpoints.',
     )
     parser.add_argument(
-        '--no-plateau-abort',
-        action='store_true',
-        help='Disable early abort when reach success stops improving.',
+        '--plateau-abort',
+        action=argparse.BooleanOptionalAction,
+        default=None,
+        help='Abort when reach success stalls (default: off; duration budget is primary).',
     )
     parser.add_argument(
         '--plateau-window-iterations',
@@ -234,7 +235,7 @@ def parse_args() -> argparse.Namespace:
         '--episode-length-s',
         type=float,
         default=None,
-        help='Episode duration in seconds (default 10 for training, play/demo use 30).',
+        help='Episode duration in seconds (default matches demo/play: 30 s).',
     )
     parser.add_argument(
         '--target-sampling',
@@ -287,6 +288,14 @@ def parse_args() -> argparse.Namespace:
         from isaac_lab.training_defaults import DEFAULT_PLATEAU_MIN_REACH  # noqa: WPS433
 
         args.plateau_min_reach = DEFAULT_PLATEAU_MIN_REACH
+    if args.episode_length_s is None:
+        from isaac_lab.training_defaults import DEFAULT_EPISODE_LENGTH_S  # noqa: WPS433
+
+        args.episode_length_s = DEFAULT_EPISODE_LENGTH_S
+    if args.plateau_abort is None:
+        from isaac_lab.training_defaults import DEFAULT_ABORT_ON_PLATEAU  # noqa: WPS433
+
+        args.plateau_abort = DEFAULT_ABORT_ON_PLATEAU
     return args
 
 
@@ -406,7 +415,7 @@ def main() -> int:
         target_reach_success_rate=args.target_reach_success_rate,
         target_push_success_rate=args.target_push_success_rate,
         target_contact_rate=args.target_contact_rate,
-        abort_on_plateau=not args.no_plateau_abort,
+        abort_on_plateau=args.plateau_abort,
         plateau_warmup_iterations=args.plateau_warmup_iterations,
         plateau_window_iterations=args.plateau_window_iterations,
         min_reach_improvement=args.min_reach_improvement,

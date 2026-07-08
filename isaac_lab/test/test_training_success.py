@@ -27,7 +27,8 @@ from isaac_lab.training_success import (
 
 
 def test_compute_max_episode_steps() -> None:
-    assert compute_max_episode_steps() == 360
+    # Default episode_length_s=30 with sim_dt=1/60, decimation=2 → 900 steps.
+    assert compute_max_episode_steps() == 900
 
 
 def test_iteration_report_marks_reach_requirement() -> None:

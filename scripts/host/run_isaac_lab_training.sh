@@ -8,6 +8,8 @@
 #   ./scripts/host/run_isaac_lab_training.sh train [--headless] [--num-arms N] [--max-duration-minutes M]
 #   ./scripts/host/run_isaac_lab_training.sh play [--checkpoint PATH] [--episodes N]
 #   ./scripts/host/run_isaac_lab_training.sh demo [--checkpoint PATH]
+#   ./scripts/host/run_isaac_lab_training.sh two-phase [--headless]
+#   ./scripts/host/run_isaac_lab_training.sh verify-demo [--headless]
 #
 # Visualization (Isaac Sim GUI) is the default for train/play. Pass --headless to disable the GUI.
 # Default arms: 2 with GUI, 8 headless (DGX Spark). EE cameras use --enable_cameras (auto).
@@ -171,6 +173,10 @@ case "${MODE}" in
           HEADLESS=1
           shift
           ;;
+        --checkpoint|--seed|--robot-usd|--episode-length-s|--demo-max-episodes)
+          PLAY_ARGS+=("$1" "$2")
+          shift 2
+          ;;
         *)
           PLAY_ARGS+=("$1")
           shift
@@ -201,7 +207,7 @@ case "${MODE}" in
     DEMO_ARGS=(--demo --viz kit --num-arms 1)
     while [[ $# -gt 0 ]]; do
       case "$1" in
-        --checkpoint|--seed|--robot-usd)
+        --checkpoint|--seed|--robot-usd|--episode-length-s)
           DEMO_ARGS+=("$1" "$2")
           shift 2
           ;;
@@ -223,8 +229,14 @@ case "${MODE}" in
       ./isaaclab.sh -p "${REPO_ROOT}/isaac_lab/play_ppo.py" "${DEMO_ARGS[@]}"
     )
     ;;
+  two-phase)
+    exec "${REPO_ROOT}/scripts/run_two_phase_training.sh" "$@"
+    ;;
+  verify-demo)
+    exec "${REPO_ROOT}/scripts/verify_demo_policy.sh" "$@"
+    ;;
   *)
-    echo "Usage: $0 {check|install|verify|train|play|demo} [args...]" >&2
+    echo "Usage: $0 {check|install|verify|train|play|demo|two-phase|verify-demo} [args...]" >&2
     exit 1
     ;;
 esac

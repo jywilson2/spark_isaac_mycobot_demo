@@ -89,11 +89,13 @@ class MyCobotReachEnvCfg(DirectRLEnvCfg):
     """Configuration for Phase 2 EE reach DirectRLEnv."""
 
     decimation = 2
-    episode_length_s = 10.0
+    episode_length_s = 30.0
     action_space = ACTION_DIM
     observation_space = OBSERVATION_DIM
     state_space = 0
     action_scale: float = 0.12
+    # EMA on raw joint deltas — smooth acceleration/deceleration (spec.md).
+    action_smoothing_alpha: float = 0.35
     robot_usd_path: str = str(DEFAULT_ROBOT_USD)
     checkpoint_dir: str = str(DEFAULT_CHECKPOINT_DIR)
     # ``curriculum`` — staged easy→hard sampling during training.
@@ -168,6 +170,8 @@ class MyCobotReachEnv(DirectRLEnv):
         self._reach_success_history: deque[bool] = deque(maxlen=EPISODE_METRICS_HISTORY)
         self._time_to_reach_history: deque[float] = deque(maxlen=EPISODE_METRICS_HISTORY)
         self._prev_distance: torch.Tensor | None = None
+        self._prev_step_actions: torch.Tensor | None = None
+        self._action_jerk: torch.Tensor | None = None
         self._curriculum_stage_name = 'near_ee'
         self._demo_target_initialized = False
         self._last_demo_targets: torch.Tensor | None = None
@@ -311,10 +315,18 @@ class MyCobotReachEnv(DirectRLEnv):
         return torch.linalg.vector_norm(ee_pos - self._target_ee_pos, dim=-1)
 
     def _pre_physics_step(self, actions: torch.Tensor) -> None:
-        # Bound raw actions so per-step joint deltas never exceed action_scale,
-        # no matter how wide the exploration distribution grows. Unbounded
-        # samples previously drove violent motion that destabilized PhysX.
-        self.actions = torch.clamp(actions, -1.0, 1.0)
+        # Bound raw actions, then EMA-smooth for gradual accel/decel (spec.md).
+        raw = torch.clamp(actions, -1.0, 1.0)
+        alpha = float(self.cfg.action_smoothing_alpha)
+        prev = self._prev_step_actions
+        if prev is None or prev.shape != raw.shape:
+            smoothed = raw
+            self._action_jerk = torch.zeros(raw.shape[0], device=raw.device)
+        else:
+            smoothed = alpha * raw + (1.0 - alpha) * prev
+            self._action_jerk = (smoothed - prev).abs().mean(dim=-1)
+        self._prev_step_actions = smoothed.detach().clone()
+        self.actions = smoothed
 
     def _apply_action(self) -> None:
         """Apply learned joint deltas — the policy is the IK controller (spec.md)."""
@@ -370,6 +382,10 @@ class MyCobotReachEnv(DirectRLEnv):
             self._prev_distance = distance.detach().clone()
 
         mean_abs_actions = self.actions.abs().mean(dim=-1)
+        if self._action_jerk is not None and self._action_jerk.shape[0] == self.num_envs:
+            mean_jerk = self._action_jerk
+        else:
+            mean_jerk = torch.zeros(self.num_envs, device=self.device)
         rewards = torch.zeros(self.num_envs, device=self.device)
         for env_idx in range(self.num_envs):
             reward, _dist = compute_reach_task_reward(
@@ -381,6 +397,7 @@ class MyCobotReachEnv(DirectRLEnv):
                 target_z=float(self._target_ee_pos[env_idx, 2].item()),
                 prev_distance_m=float(self._prev_distance[env_idx].item()),
                 mean_abs_action=float(mean_abs_actions[env_idx].item()),
+                mean_action_jerk=float(mean_jerk[env_idx].item()),
                 cfg=self._task_cfg,
             )
             rewards[env_idx] = reward
@@ -451,6 +468,10 @@ class MyCobotReachEnv(DirectRLEnv):
             self._episode_reached[env_ids_tensor] = False
             self._episode_steps_to_reach[env_ids_tensor] = float(self.max_episode_length)
             self._prev_distance = None
+            if self._prev_step_actions is not None:
+                self._prev_step_actions[env_ids_tensor] = 0.0
+            if self._action_jerk is not None:
+                self._action_jerk[env_ids_tensor] = 0.0
 
     def get_task_metrics(self) -> dict[str, float]:
         if not self._reach_success_history:

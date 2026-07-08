@@ -211,6 +211,21 @@ def test_compute_reach_task_reward_action_penalty() -> None:
     assert reward_violent == reward_calm - cfg.action_penalty
 
 
+def test_compute_reach_task_reward_jerk_penalty() -> None:
+    from isaac_lab.mdp_core import ReachTaskConfig, compute_reach_task_reward
+
+    cfg = ReachTaskConfig()
+    reward_smooth, _ = compute_reach_task_reward(
+        0.15, 0.0, 0.12, 0.22, 0.0, 0.12,
+        prev_distance_m=0.07, mean_action_jerk=0.0, cfg=cfg,
+    )
+    reward_jerky, _ = compute_reach_task_reward(
+        0.15, 0.0, 0.12, 0.22, 0.0, 0.12,
+        prev_distance_m=0.07, mean_action_jerk=1.0, cfg=cfg,
+    )
+    assert reward_jerky == reward_smooth - cfg.jerk_penalty
+
+
 def test_resolve_curriculum_stage_advances_with_success() -> None:
     from isaac_lab.mdp_core import resolve_curriculum_stage
 

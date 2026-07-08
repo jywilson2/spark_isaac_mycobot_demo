@@ -3,6 +3,32 @@ last_prompt.md
 # The last prompt executed in the Cursor Agent window:
 
 ## BEGIN
+Reread @spec.md as a reminder of project requirements.
+
+Add the following project requirements to @spec.md : 
+
+- Arm movements should not stutter and should apply smooth acceleration and decleration of motor actuation. This is more important than the duration of the movement sequence to avoid motor wear.
+
+- This project must be sufficiently generic to generate an implementation of IK using RL that will work on a real MyCobot 280 arm in any movement scenario. If necessary, modify the training strategy and and demo mode to satisfy this requirement.
+
+-  Use demo mode as a validation of a completed training sequence. Vary the duration of the demo mode episode length to assure that the target accuracy of the trained policy is retained.
+
+Make the training default episode length always match that of the default demo episode length.
+
+Make ---no-pleateau-abort the default option.
+
+As recommended, implement a two-phase training script.
+
+Update @README.md for the phase in development to describe the latest committed change. Details of the change and reason it was performed should be provided. Update @docs/project_status.md after each commit for the phase in development to indicate its operational status. Update @spec.md to indicate that both of these documents must be changed after each commit.
+
+Once these changes are completed and verified, restart training from scratch to verify that both training and demo mode can achieve >95% accuracy, and still comply with all of the requirements in @spec.md The duration of the training sequence is at your discretion and may be restarted from scratch or resumed for experimentation. Be certain that the recipe used for training can be consistently reproduced and will work in a generic manner for subsequent phases and demo modes of varying duration.
+
+Continue to iterate until all goals are achieved, or you determine that a solution is not possible.
+## END
+
+# Old prompts:
+
+## BEGIN
 Can you verify that all prompts are saved in last_prompt.md? If any are missing, please add them to the file. I will be using this data to better understand how the functionality of this project evolved during development.
 
 Resume the training from yesterday as you recommended, with a goal of 95%, lower than the previous goal of 99%.
@@ -11,8 +37,6 @@ If the training goal is reached (i.e. no abort and and reach percentage is at le
 
 If either training or demo mode fail, then speculate on why this may be happening and make changes as you see fit and continue to iterate. Once you finally achieve complete success restate all of the changes made across iterations @docs/project_status.md and commit/push to the remote repo.
 ## END
-
-# Old prompts:
 
 ## BEGIN
 Fix any issues you identified during training (e.g. the inability to control whether training proceeds from scratch) and report back. Do not resume training until I have had a chance to review your insights.

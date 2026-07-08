@@ -81,6 +81,12 @@ def build_parser(*, with_app_launcher: bool = True) -> argparse.ArgumentParser:
         default=10,
         help='Finite play episodes (ignored when --demo is set).',
     )
+    parser.add_argument(
+        '--episode-length-s',
+        type=float,
+        default=None,
+        help='Episode duration in seconds (default matches training: 30 s).',
+    )
     parser.add_argument('--num-arms', type=int, default=1)
     parser.add_argument('--seed', type=int, default=7)
     parser.add_argument(
@@ -116,6 +122,10 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     args = build_parser(with_app_launcher=True).parse_args(argv)
     if args.demo:
         args.num_arms = 1
+    if args.episode_length_s is None:
+        from isaac_lab.training_defaults import DEFAULT_EPISODE_LENGTH_S  # noqa: WPS433
+
+        args.episode_length_s = DEFAULT_EPISODE_LENGTH_S
     return args
 
 
@@ -291,7 +301,7 @@ def main() -> int:
         robot_usd_path=str(args.robot_usd.resolve()),
         seed=args.seed,
         target_sampling='demo' if args.demo else 'workspace',
-        episode_length_s=30.0,
+        episode_length_s=args.episode_length_s,
         action_scale=args.action_scale,
     )
     env = MyCobotReachEnv(cfg=env_cfg)
