@@ -6,23 +6,24 @@ Automated pipeline for simulating the Elephant Robotics MyCobot 280 inside NVIDI
 
 ## Phase in development (Phase 2 — EE reach PPO)
 
-**Latest change (2026-07-08):** Two-phase training recipe, smooth motion shaping, and aligned train/demo horizons.
+**Latest change (2026-07-08):** Two-phase training verified — **99/100 demo success at 20/30/40 s**.
 
-| Change | Why |
-|--------|-----|
-| **EMA action smoothing + jerk penalty** in `mycobot_reach_env.py` / `mdp_core.py` | Spec requires non-stuttery, servo-friendly accel/decel on the real MyCobot 280 — smooth motion outweighs raw speed. |
-| **Default episode length 30 s** for training and demo (`DEFAULT_EPISODE_LENGTH_S`) | Training and validation must share the same horizon so policies are not tuned on a shorter window than demo. |
-| **`--plateau-abort` opt-in** (default **off**) | Duration budget is the primary stop; plateau abort was prematurely ending long curriculum runs. |
-| **`scripts/run_two_phase_training.sh`** + **`scripts/verify_demo_policy.sh`** | Reproducible curriculum → demo fine-tune → 20/30/40 s headless demo verify (≥ 95% each). |
-| Host wrappers `two-phase` / `verify-demo` | Same entry points from `run_isaac_lab_training.sh`. |
+| Result | Detail |
+|--------|--------|
+| Phase A (90 min curriculum) | **88.3%** rolling reach |
+| Phase B (30 min demo fine-tune) | **97.7%** rolling reach |
+| Demo verify @ 20 / 30 / 40 s | **99/100 (99%)** each — ≥ 95% gate **passed** |
 
-**Recommended train + verify (host, headless):**
+Prior infrastructure changes (same release): EMA smoothing + jerk penalty, 30 s shared train/demo horizon, plateau abort default off, `run_two_phase_training.sh` + `verify_demo_policy.sh`.
+
+**Reproduce:**
 
 ```bash
 ./scripts/host/run_isaac_lab_training.sh two-phase --headless
+./scripts/host/run_isaac_lab_training.sh verify-demo --headless
 ```
 
-Operational status after this commit: see [docs/project_status.md](docs/project_status.md).
+Operational status: [docs/project_status.md](docs/project_status.md).
 
 ## Repository Layout
 

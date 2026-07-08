@@ -175,7 +175,7 @@ README and host-script docs should stay aligned with `spec.md` command paths.
 * [x] Smooth motion — EMA action smoothing + jerk penalty in reach reward
 * [x] Train-until-success loop (`isaac_lab/training_success.py`)
 * [x] Unit + integration tests
-* [ ] **Verify ≥ 95% reach** at 20/30/40 s demo horizons on DGX Spark headless two-phase train
+* [x] **Verify ≥ 95% reach** at 20/30/40 s demo horizons on DGX Spark headless two-phase train
 
 ### Phase 3–4: Sim-to-real & edge deployment
 

@@ -39,7 +39,7 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-PLAY_ARGS=(play --demo --demo-max-episodes "${EPISODES}" --num-arms 1 --checkpoint "${CHECKPOINT}")
+PLAY_ARGS=(--demo --demo-max-episodes "${EPISODES}" --num-arms 1 --checkpoint "${CHECKPOINT}")
 if [[ "${HEADLESS}" -eq 1 ]]; then
   PLAY_ARGS=(--headless "${PLAY_ARGS[@]}")
 fi
@@ -50,7 +50,7 @@ for length_s in "${LENGTHS[@]}"; do
   echo "=== Demo verify: episode_length_s=${length_s}, episodes=${EPISODES} ==="
   LOG="${TMPDIR:-/tmp}/spark_demo_verify_${length_s}s_$(date +%Y%m%d_%H%M%S).log"
   set +e
-  "${PLAY}" "${PLAY_ARGS[@]}" --episode-length-s "${length_s}" 2>&1 | tee "${LOG}"
+  "${PLAY}" play "${PLAY_ARGS[@]}" --episode-length-s "${length_s}" 2>&1 | tee "${LOG}"
   PLAY_EXIT=$?
   set -e
   if [[ "${PLAY_EXIT}" -ne 0 ]]; then
@@ -74,10 +74,10 @@ for length_s in "${LENGTHS[@]}"; do
   RATE="$(python3 -c "print(float('${RATE_PCT}') / 100.0)")"
   OK="$(python3 -c "print(1 if float('${RATE}') >= float('${MIN_RATE}') else 0)")"
   if [[ "${OK}" -ne 1 ]]; then
-    echo "FAIL: ${RATE_PCT}% < $((MIN_RATE * 100))% at ${length_s}s episode length" >&2
+    echo "FAIL: ${RATE_PCT}% < 95% at ${length_s}s episode length" >&2
     OVERALL_OK=0
   else
-    echo "PASS: ${RATE_PCT}% >= $((MIN_RATE * 100))% at ${length_s}s"
+    echo "PASS: ${RATE_PCT}% >= 95% at ${length_s}s"
   fi
 done
 
