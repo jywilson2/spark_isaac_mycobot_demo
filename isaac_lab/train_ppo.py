@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Run Isaac Lab PPO training for the MyCobot reach (Phase 2) or red-block (Phase 6) task.
+"""Run Isaac Lab PPO training for the MyCobot reach (Phase 2) or red-block (Phase 5) task.
 
 Default training is **duration-bounded** (30 minutes) with early stop at 99% reach
 success. Use ``--fixed-iterations`` for short smoke tests. See spec.md § Phase 2.
@@ -147,18 +147,18 @@ def parse_args() -> argparse.Namespace:
         '--target-push-success-rate',
         type=float,
         default=0.50,
-        help='Phase 6 only: stop when rolling push-success rate reaches this target.',
+        help='Phase 5 only: stop when rolling push-success rate reaches this target.',
     )
     parser.add_argument(
         '--target-contact-rate',
         type=float,
         default=0.70,
-        help='Phase 6 only: required contact rate paired with push-success target.',
+        help='Phase 5 only: required contact rate paired with push-success target.',
     )
     parser.add_argument(
         '--use-red-block-vision',
         action='store_true',
-        help='Enable Phase 6 red-block vision + contact-and-push task (requires --enable_cameras).',
+        help='Enable Phase 5 red-block vision + contact-and-push task (requires --enable_cameras).',
     )
     parser.add_argument(
         '--fixed-iterations',
@@ -239,10 +239,22 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         '--target-sampling',
-        choices=('curriculum', 'workspace', 'demo'),
+        choices=('curriculum', 'workspace', 'demo', 'precision'),
         default='curriculum',
-        help='Target placement strategy during training. Use ``demo`` to fine-tune '
-        'on the same stratified workspace distribution as the GUI showcase.',
+        help='Target placement: curriculum, workspace, demo, or precision (demo + '
+        'direct-path reward shaping).',
+    )
+    parser.add_argument(
+        '--reach-tolerance-m',
+        type=float,
+        default=None,
+        help='EE success tolerance in meters (default 1 mm per spec.md).',
+    )
+    parser.add_argument(
+        '--direct-path-shaping',
+        action=argparse.BooleanOptionalAction,
+        default=False,
+        help='Penalize lateral EE motion inside the approach zone (precision stage).',
     )
     parser.add_argument(
         '--action-scale',
@@ -292,6 +304,10 @@ def parse_args() -> argparse.Namespace:
         from isaac_lab.training_defaults import DEFAULT_EPISODE_LENGTH_S  # noqa: WPS433
 
         args.episode_length_s = DEFAULT_EPISODE_LENGTH_S
+    if args.reach_tolerance_m is None:
+        from isaac_lab.mdp_core import EE_REACH_TOLERANCE_M  # noqa: WPS433
+
+        args.reach_tolerance_m = EE_REACH_TOLERANCE_M
     if args.plateau_abort is None:
         from isaac_lab.training_defaults import DEFAULT_ABORT_ON_PLATEAU  # noqa: WPS433
 
@@ -315,9 +331,9 @@ def main() -> int:
     from isaac_lab.detect_isaac_lab import require_isaac_lab  # noqa: WPS433
 
     if args.use_red_block_vision:
-        from isaac_lab.phase6_red_block.red_block_env import (  # noqa: WPS433
+        from isaac_lab.phase5_red_block.red_block_env import (  # noqa: WPS433
             MyCobotRedBlockEnv,
-            PHASE6_TASK_ID as TASK_ID,
+            PHASE5_TASK_ID as TASK_ID,
             make_env_cfg,
             register_red_block_env,
         )
@@ -386,6 +402,8 @@ def main() -> int:
         target_sampling=args.target_sampling,
         episode_length_s=args.episode_length_s,
         action_scale=args.action_scale,
+        reach_tolerance_m=args.reach_tolerance_m,
+        direct_path_shaping=args.direct_path_shaping,
     )
     env = EnvClass(cfg=env_cfg)
 

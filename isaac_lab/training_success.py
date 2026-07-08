@@ -58,7 +58,7 @@ def compute_max_episode_return(
 class TrainingSuccessCriteria:
     """Per-iteration gates and task targets."""
 
-    task_mode: str = 'reach'  # 'reach' (Phase 2) or 'red_block' (Phase 6)
+    task_mode: str = 'reach'  # 'reach' (Phase 2) or 'red_block' (Phase 5)
 
     max_step_reward: float = 20.0
     max_episode_steps: int = compute_max_episode_steps()
@@ -171,7 +171,7 @@ class IterationReport:
         task_label = (
             'EE reach-to-target (Phase 2)'
             if self.task_mode == 'reach'
-            else 'Red-block contact-and-push (Phase 6)'
+            else 'Red-block contact-and-push (Phase 5)'
         )
         lines.extend(['', f'{task_label}:'])
         for result in self.progress_results:

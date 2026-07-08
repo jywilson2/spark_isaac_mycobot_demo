@@ -17,6 +17,7 @@ CHECKPOINT="${REPO_ROOT}/assets/checkpoints/isaac_lab_ppo/latest_policy"
 EPISODES=100
 MIN_RATE=0.95
 LENGTHS=(20 30 40)
+REACH_TOLERANCE_M=""
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -32,6 +33,10 @@ while [[ $# -gt 0 ]]; do
       EPISODES="$2"
       shift 2
       ;;
+    --reach-tolerance-m)
+      REACH_TOLERANCE_M="$2"
+      shift 2
+      ;;
     *)
       echo "Unknown argument: $1" >&2
       exit 2
@@ -39,7 +44,13 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-PLAY_ARGS=(--demo --demo-max-episodes "${EPISODES}" --num-arms 1 --checkpoint "${CHECKPOINT}")
+if [[ -z "${REACH_TOLERANCE_M}" ]]; then
+  REACH_TOLERANCE_M="$(python3 -c "from isaac_lab.mdp_core import EE_REACH_TOLERANCE_M; print(EE_REACH_TOLERANCE_M)")"
+fi
+TOL_MM="$(python3 -c "print(float('${REACH_TOLERANCE_M}') * 1000.0)")"
+echo "Verify tolerance: ${TOL_MM} mm | min success rate: ${MIN_RATE}"
+
+PLAY_ARGS=(--demo --demo-max-episodes "${EPISODES}" --num-arms 1 --checkpoint "${CHECKPOINT}" --reach-tolerance-m "${REACH_TOLERANCE_M}")
 if [[ "${HEADLESS}" -eq 1 ]]; then
   PLAY_ARGS=(--headless "${PLAY_ARGS[@]}")
 fi

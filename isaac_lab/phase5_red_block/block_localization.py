@@ -21,7 +21,7 @@ from dataclasses import dataclass
 import torch
 
 from isaac_lab.mdp_core import compute_target_ee_pose
-from isaac_lab.phase6_red_block.block_vision import detect_red_block_in_camera_batch
+from isaac_lab.phase5_red_block.block_vision import detect_red_block_in_camera_batch
 
 
 @dataclass(frozen=True)

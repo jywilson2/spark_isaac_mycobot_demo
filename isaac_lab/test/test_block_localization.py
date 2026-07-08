@@ -26,7 +26,7 @@ import pytest
 def test_localize_block_from_camera_batch_produces_target_ee() -> None:
     import torch
 
-    from isaac_lab.phase6_red_block.block_localization import localize_block_from_camera_batch
+    from isaac_lab.phase5_red_block.block_localization import localize_block_from_camera_batch
 
     rgb = torch.zeros((1, 64, 64, 3))
     rgb[0, 28:36, 28:36, 0] = 0.95
@@ -48,7 +48,7 @@ def test_localize_block_from_camera_batch_produces_target_ee() -> None:
 
 
 def test_init_scan_has_multiple_waypoints() -> None:
-    from isaac_lab.phase6_red_block.init_scan import INIT_SCAN_JOINT_WAYPOINTS, waypoint_count
+    from isaac_lab.phase5_red_block.init_scan import INIT_SCAN_JOINT_WAYPOINTS, waypoint_count
 
     assert waypoint_count() == len(INIT_SCAN_JOINT_WAYPOINTS)
     assert waypoint_count() >= 3

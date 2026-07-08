@@ -141,6 +141,28 @@ def test_sample_demo_workspace_enforces_separation() -> None:
     assert math.dist(previous[0], nxt) >= DEMO_MIN_TARGET_SEPARATION_M - 1e-6
 
 
+def test_compute_lateral_step_m_is_zero_for_radial_motion() -> None:
+    from isaac_lab.mdp_core import compute_lateral_step_m
+
+    # Step directly toward target (no lateral component).
+    assert compute_lateral_step_m(0.01, 0.0, 0.0, 0.1, 0.0, 0.0) < 1e-9
+
+
+def test_compute_reach_task_reward_lateral_penalty_in_approach_zone() -> None:
+    from isaac_lab.mdp_core import ReachTaskConfig, compute_reach_task_reward
+
+    cfg = ReachTaskConfig(direct_path_shaping=True, approach_zone_m=0.05, lateral_penalty=1.0)
+    reward_straight, _ = compute_reach_task_reward(
+        0.20, 0.0, 0.12, 0.22, 0.0, 0.12,
+        prev_distance_m=0.03, lateral_step_m=0.0, cfg=cfg,
+    )
+    reward_sideways, _ = compute_reach_task_reward(
+        0.20, 0.0, 0.12, 0.22, 0.0, 0.12,
+        prev_distance_m=0.03, lateral_step_m=0.01, cfg=cfg,
+    )
+    assert reward_sideways == reward_straight - cfg.lateral_penalty * 0.01
+
+
 def test_compute_reach_task_reward_bonus_at_target() -> None:
     from isaac_lab.mdp_core import ReachTaskConfig, compute_reach_task_reward
 
@@ -153,12 +175,12 @@ def test_compute_reach_task_reward_bonus_at_target() -> None:
 
 
 def test_compute_reach_task_reward_no_proximity_without_progress() -> None:
-    from isaac_lab.mdp_core import compute_reach_task_reward
+    from isaac_lab.mdp_core import EE_REACH_TOLERANCE_M, compute_reach_task_reward
 
     reward_still, dist = compute_reach_task_reward(
         0.15, 0.0, 0.12, 0.22, 0.0, 0.12, prev_distance_m=0.07,
     )
-    assert dist > 0.025
+    assert dist > EE_REACH_TOLERANCE_M
     assert reward_still == -0.02  # time penalty only when standing still
 
 def test_compute_reach_task_reward_moving_away_is_penalized() -> None:

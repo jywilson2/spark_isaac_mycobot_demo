@@ -38,7 +38,7 @@ OBSERVATION_DIM = 11
 # Phase 2 reach: joint deltas — the RL policy learns IK (see spec.md § no IK solvers).
 REACH_ACTION_DIM = 6
 
-# Phase 6 contact-and-push uses the same joint-delta layout.
+# Phase 5 contact-and-push uses the same joint-delta layout.
 ACTION_DIM = 6
 
 REVOLUTE_JOINT_NAMES = (
@@ -52,7 +52,12 @@ REVOLUTE_JOINT_NAMES = (
 
 END_EFFECTOR_BODY_NAME = 'joint6_flange'
 TARGET_PUSH_DISTANCE_M = 0.005
-EE_REACH_TOLERANCE_M = 0.025
+# Final EE position tolerance (spec.md): 1 mm.
+EE_REACH_TOLERANCE_M = 0.001
+# Coarse tolerance for early curriculum stages before precision fine-tune.
+EE_REACH_TOLERANCE_COARSE_M = 0.025
+# When EE is within this distance, penalize lateral (non-radial) motion steps.
+DEFAULT_APPROACH_ZONE_M = 0.05
 DEFAULT_TARGET_REACH_SUCCESS_RATE = 0.99
 
 # Reachable workspace annulus on the table (meters from robot base).
@@ -115,6 +120,10 @@ class ReachTaskConfig:
     jerk_penalty: float = 0.08
     # EMA blend for raw actions: higher = more responsive, lower = smoother motion.
     action_smoothing_alpha: float = 0.35
+    # Direct-path shaping (spec.md): penalize lateral steps inside ``approach_zone_m``.
+    approach_zone_m: float = DEFAULT_APPROACH_ZONE_M
+    lateral_penalty: float = 2.0
+    direct_path_shaping: bool = False
 
 
 @dataclass(frozen=True)
@@ -453,6 +462,34 @@ def is_ee_at_target(
     return distance <= tolerance_m
 
 
+def compute_lateral_step_m(
+    step_x: float,
+    step_y: float,
+    step_z: float,
+    to_target_x: float,
+    to_target_y: float,
+    to_target_z: float,
+) -> float:
+    """Magnitude of the EE step orthogonal to the direct line toward the target.
+
+    Used to discourage corrective zig-zag when the flange is already near the
+  goal (spec.md § direct approach).
+    """
+
+    step_len = math.hypot(step_x, step_y, step_z)
+    if step_len < 1e-9:
+        return 0.0
+    tgt_len = math.hypot(to_target_x, to_target_y, to_target_z)
+    if tgt_len < 1e-9:
+        return 0.0
+    cos_align = (
+        (step_x * to_target_x + step_y * to_target_y + step_z * to_target_z)
+        / (step_len * tgt_len)
+    )
+    cos_align = max(-1.0, min(1.0, cos_align))
+    return step_len * math.sqrt(max(0.0, 1.0 - cos_align * cos_align))
+
+
 def compute_reach_task_reward(
     end_effector_x: float,
     end_effector_y: float,
@@ -464,6 +501,7 @@ def compute_reach_task_reward(
     prev_distance_m: float | None = None,
     mean_abs_action: float = 0.0,
     mean_action_jerk: float = 0.0,
+    lateral_step_m: float = 0.0,
     cfg: ReachTaskConfig | None = None,
 ) -> tuple[float, float]:
     """Return potential-based reach reward and current EE-to-target distance.
@@ -472,7 +510,9 @@ def compute_reach_task_reward(
     moving closer earns positive credit, moving away costs exactly as much, so
     oscillating toward/away from the target nets zero (a true potential-based
     term per Ng et al. 1999). Terminal ``reach_bonus`` applies inside tolerance.
-  Small ``action_penalty`` and ``jerk_penalty`` terms discourage stuttery motion.
+    Small ``action_penalty`` and ``jerk_penalty`` terms discourage stuttery motion.
+    When ``direct_path_shaping`` is on and distance < ``approach_zone_m``, a
+    ``lateral_penalty`` term discourages corrective sideways motion.
     """
 
     task = cfg or ReachTaskConfig()
@@ -490,6 +530,8 @@ def compute_reach_task_reward(
         - task.action_penalty * abs(mean_abs_action)
         - task.jerk_penalty * abs(mean_action_jerk)
     )
+    if task.direct_path_shaping and distance <= task.approach_zone_m:
+        reward -= task.lateral_penalty * abs(lateral_step_m)
     if distance <= task.reach_tolerance_m:
         reward += task.reach_bonus
     return reward, distance

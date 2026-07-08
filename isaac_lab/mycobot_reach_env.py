@@ -101,7 +101,10 @@ class MyCobotReachEnvCfg(DirectRLEnvCfg):
     # ``curriculum`` — staged easy→hard sampling during training.
     # ``workspace`` — uniform over the full reach envelope (play).
     # ``demo`` — stratified workspace cells + min separation (showcase).
+    # ``precision`` — demo distribution + direct-path reward shaping (fine-tune).
     target_sampling: str = 'curriculum'
+    reach_tolerance_m: float = EE_REACH_TOLERANCE_M
+    direct_path_shaping: bool = False
 
     sim: SimulationCfg = SimulationCfg(dt=1.0 / 60.0, render_interval=decimation)
     scene: InteractiveSceneCfg = InteractiveSceneCfg(
@@ -162,7 +165,11 @@ class MyCobotReachEnv(DirectRLEnv):
         render_mode: str | None = None,
         **kwargs,
     ) -> None:
-        self._task_cfg = ReachTaskConfig(action_scale=cfg.action_scale)
+        self._task_cfg = ReachTaskConfig(
+            action_scale=cfg.action_scale,
+            reach_tolerance_m=cfg.reach_tolerance_m,
+            direct_path_shaping=cfg.direct_path_shaping,
+        )
         self._ee_body_idx = 0
         self._target_ee_pos = None
         self._episode_reached = None
@@ -170,6 +177,7 @@ class MyCobotReachEnv(DirectRLEnv):
         self._reach_success_history: deque[bool] = deque(maxlen=EPISODE_METRICS_HISTORY)
         self._time_to_reach_history: deque[float] = deque(maxlen=EPISODE_METRICS_HISTORY)
         self._prev_distance: torch.Tensor | None = None
+        self._prev_ee_pos: torch.Tensor | None = None
         self._prev_step_actions: torch.Tensor | None = None
         self._action_jerk: torch.Tensor | None = None
         self._curriculum_stage_name = 'near_ee'
@@ -234,6 +242,14 @@ class MyCobotReachEnv(DirectRLEnv):
             )
             return torch.tensor(batch, dtype=torch.float, device=self.device)
 
+        if self.cfg.target_sampling == 'precision':
+            self._curriculum_stage_name = 'precision'
+            batch = sample_demo_workspace_xyz(
+                count,
+                previous_targets=previous_targets,
+            )
+            return torch.tensor(batch, dtype=torch.float, device=self.device)
+
         if self.cfg.target_sampling == 'workspace':
             self._curriculum_stage_name = 'workspace'
             batch = sample_reachable_ee_xyz(count, easy_fraction=0.0)
@@ -270,7 +286,7 @@ class MyCobotReachEnv(DirectRLEnv):
     def _reset_target_marker(self, env_ids: torch.Tensor) -> None:
         ee_pos = self._ee_position_base()[env_ids]
         previous_targets = None
-        if self.cfg.target_sampling == 'demo' and self._demo_target_initialized:
+        if self.cfg.target_sampling in ('demo', 'precision') and self._demo_target_initialized:
             previous_targets = [
                 tuple(self._last_demo_targets[i].detach().cpu().tolist())
                 for i in env_ids.tolist()
@@ -281,7 +297,7 @@ class MyCobotReachEnv(DirectRLEnv):
             previous_targets=previous_targets,
         )
         self._target_ee_pos[env_ids] = local_pos
-        if self.cfg.target_sampling == 'demo':
+        if self.cfg.target_sampling in ('demo', 'precision'):
             if self._last_demo_targets is None:
                 self._last_demo_targets = torch.zeros_like(self._target_ee_pos)
             self._last_demo_targets[env_ids] = local_pos
@@ -381,6 +397,8 @@ class MyCobotReachEnv(DirectRLEnv):
         if self._prev_distance is None:
             self._prev_distance = distance.detach().clone()
 
+        from isaac_lab.mdp_core import compute_lateral_step_m  # noqa: WPS433
+
         mean_abs_actions = self.actions.abs().mean(dim=-1)
         if self._action_jerk is not None and self._action_jerk.shape[0] == self.num_envs:
             mean_jerk = self._action_jerk
@@ -388,6 +406,16 @@ class MyCobotReachEnv(DirectRLEnv):
             mean_jerk = torch.zeros(self.num_envs, device=self.device)
         rewards = torch.zeros(self.num_envs, device=self.device)
         for env_idx in range(self.num_envs):
+            lateral = 0.0
+            if self._prev_ee_pos is not None:
+                lateral = compute_lateral_step_m(
+                    float(ee_pos[env_idx, 0].item() - self._prev_ee_pos[env_idx, 0].item()),
+                    float(ee_pos[env_idx, 1].item() - self._prev_ee_pos[env_idx, 1].item()),
+                    float(ee_pos[env_idx, 2].item() - self._prev_ee_pos[env_idx, 2].item()),
+                    float(self._target_ee_pos[env_idx, 0].item() - ee_pos[env_idx, 0].item()),
+                    float(self._target_ee_pos[env_idx, 1].item() - ee_pos[env_idx, 1].item()),
+                    float(self._target_ee_pos[env_idx, 2].item() - ee_pos[env_idx, 2].item()),
+                )
             reward, _dist = compute_reach_task_reward(
                 end_effector_x=float(ee_pos[env_idx, 0].item()),
                 end_effector_y=float(ee_pos[env_idx, 1].item()),
@@ -398,10 +426,12 @@ class MyCobotReachEnv(DirectRLEnv):
                 prev_distance_m=float(self._prev_distance[env_idx].item()),
                 mean_abs_action=float(mean_abs_actions[env_idx].item()),
                 mean_action_jerk=float(mean_jerk[env_idx].item()),
+                lateral_step_m=lateral,
                 cfg=self._task_cfg,
             )
             rewards[env_idx] = reward
         self._prev_distance = distance.detach().clone()
+        self._prev_ee_pos = ee_pos.detach().clone()
 
         time_out = self.episode_length_buf >= self.max_episode_length - 1
         timeout_penalty = self._task_cfg.timeout_penalty
@@ -468,6 +498,9 @@ class MyCobotReachEnv(DirectRLEnv):
             self._episode_reached[env_ids_tensor] = False
             self._episode_steps_to_reach[env_ids_tensor] = float(self.max_episode_length)
             self._prev_distance = None
+            if self._prev_ee_pos is not None:
+                settled_ee = self._ee_position_base()[env_ids_tensor]
+                self._prev_ee_pos[env_ids_tensor] = settled_ee.detach()
             if self._prev_step_actions is not None:
                 self._prev_step_actions[env_ids_tensor] = 0.0
             if self._action_jerk is not None:
@@ -500,6 +533,8 @@ def make_env_cfg(
     target_sampling: str = 'curriculum',
     episode_length_s: float | None = None,
     action_scale: float | None = None,
+    reach_tolerance_m: float | None = None,
+    direct_path_shaping: bool | None = None,
 ) -> MyCobotReachEnvCfg:
     cfg = MyCobotReachEnvCfg()
     cfg.scene.num_envs = num_envs
@@ -508,6 +543,10 @@ def make_env_cfg(
         cfg.episode_length_s = episode_length_s
     if action_scale is not None:
         cfg.action_scale = action_scale
+    if reach_tolerance_m is not None:
+        cfg.reach_tolerance_m = reach_tolerance_m
+    if direct_path_shaping is not None:
+        cfg.direct_path_shaping = direct_path_shaping
     usd_path = robot_usd_path or str(DEFAULT_ROBOT_USD)
     cfg.robot_usd_path = usd_path
     cfg.robot.spawn.usd_path = usd_path

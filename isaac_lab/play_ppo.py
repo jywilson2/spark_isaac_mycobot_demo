@@ -111,6 +111,12 @@ def build_parser(*, with_app_launcher: bool = True) -> argparse.ArgumentParser:
         default=None,
         help='Joint delta scale; should match the value used during training.',
     )
+    parser.add_argument(
+        '--reach-tolerance-m',
+        type=float,
+        default=None,
+        help='Success tolerance in meters (default 1 mm per spec.md).',
+    )
     if with_app_launcher:
         from isaaclab.app import AppLauncher  # noqa: WPS433
 
@@ -126,6 +132,10 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         from isaac_lab.training_defaults import DEFAULT_EPISODE_LENGTH_S  # noqa: WPS433
 
         args.episode_length_s = DEFAULT_EPISODE_LENGTH_S
+    if args.reach_tolerance_m is None:
+        from isaac_lab.mdp_core import EE_REACH_TOLERANCE_M  # noqa: WPS433
+
+        args.reach_tolerance_m = EE_REACH_TOLERANCE_M
     return args
 
 
@@ -303,6 +313,7 @@ def main() -> int:
         target_sampling='demo' if args.demo else 'workspace',
         episode_length_s=args.episode_length_s,
         action_scale=args.action_scale,
+        reach_tolerance_m=args.reach_tolerance_m,
     )
     env = MyCobotReachEnv(cfg=env_cfg)
 

@@ -12,17 +12,17 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Phase 6 — red-block vision localization and contact-and-push (opt-in only)."""
+"""Phase 5 — red-block vision localization and contact-and-push (opt-in only)."""
 
-from isaac_lab.phase6_red_block.red_block_env import (
-    PHASE6_TASK_ID,
+from isaac_lab.phase5_red_block.red_block_env import (
+    PHASE5_TASK_ID,
     MyCobotRedBlockEnv,
     MyCobotRedBlockEnvCfg,
     register_red_block_env,
 )
 
 __all__ = [
-    'PHASE6_TASK_ID',
+    'PHASE5_TASK_ID',
     'MyCobotRedBlockEnv',
     'MyCobotRedBlockEnvCfg',
     'register_red_block_env',

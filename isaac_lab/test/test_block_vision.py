@@ -49,7 +49,7 @@ def test_is_within_arm_reach_boundary() -> None:
 def test_detect_red_block_in_camera_batch_finds_center_blob() -> None:
     import torch
 
-    from isaac_lab.phase6_red_block.block_vision import detect_red_block_in_camera_batch
+    from isaac_lab.phase5_red_block.block_vision import detect_red_block_in_camera_batch
 
     rgb = torch.zeros((2, 64, 64, 3))
     rgb[0, 28:36, 28:36, 0] = 0.95

@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Phase 6 Isaac Lab env: red-block vision localization and contact-and-push."""
+"""Phase 5 Isaac Lab env: red-block vision localization and contact-and-push."""
 
 from __future__ import annotations
 
@@ -46,8 +46,8 @@ from isaac_lab.mdp_core import (
     episode_push_task_success,
     sample_reachable_block_xy,
 )
-from isaac_lab.phase6_red_block.block_localization import localize_block_from_camera_batch
-from isaac_lab.phase6_red_block.init_scan import (
+from isaac_lab.phase5_red_block.block_localization import localize_block_from_camera_batch
+from isaac_lab.phase5_red_block.init_scan import (
     INIT_SCAN_STEPS_PER_WAYPOINT,
     build_waypoint_tensor,
     waypoint_count,
@@ -64,7 +64,7 @@ DEFAULT_ROBOT_USD = (
 )
 DEFAULT_CHECKPOINT_DIR = REPO_ROOT / 'assets' / 'checkpoints' / 'isaac_lab_ppo'
 
-PHASE6_TASK_ID = 'Spark-MyCobot-RedBlock-Direct-v0'
+PHASE5_TASK_ID = 'Spark-MyCobot-RedBlock-Direct-v0'
 EPISODE_METRICS_HISTORY = 128
 
 # Near-zero joints match the USD spawn pose that already points the EE toward +x workspace.
@@ -83,7 +83,7 @@ EE_CAMERA_WIDTH = 128
 
 @configclass
 class MyCobotRedBlockEnvCfg(DirectRLEnvCfg):
-    """Configuration for Phase 6 red-block contact-and-push DirectRLEnv."""
+    """Configuration for Phase 5 red-block contact-and-push DirectRLEnv."""
 
     decimation = 2
     episode_length_s = 12.0
@@ -163,7 +163,7 @@ class MyCobotRedBlockEnvCfg(DirectRLEnvCfg):
 
 
 class MyCobotRedBlockEnv(DirectRLEnv):
-    """Phase 6 GPU env: red-block vision localization and contact-and-push."""
+    """Phase 5 GPU env: red-block vision localization and contact-and-push."""
 
     cfg: MyCobotRedBlockEnvCfg
 
@@ -532,13 +532,13 @@ def _configure_sim_physics(cfg: MyCobotRedBlockEnvCfg) -> None:
 
 
 def register_red_block_env() -> None:
-    if PHASE6_TASK_ID in gym.registry:
+    if PHASE5_TASK_ID in gym.registry:
         return
     gym.register(
-        id=PHASE6_TASK_ID,
-        entry_point='isaac_lab.phase6_red_block.red_block_env:MyCobotRedBlockEnv',
+        id=PHASE5_TASK_ID,
+        entry_point='isaac_lab.phase5_red_block.red_block_env:MyCobotRedBlockEnv',
         disable_env_checker=True,
-        kwargs={'env_cfg_entry_point': 'isaac_lab.phase6_red_block.red_block_env:MyCobotRedBlockEnvCfg'},
+        kwargs={'env_cfg_entry_point': 'isaac_lab.phase5_red_block.red_block_env:MyCobotRedBlockEnvCfg'},
     )
 
 

@@ -6,24 +6,22 @@ Automated pipeline for simulating the Elephant Robotics MyCobot 280 inside NVIDI
 
 ## Phase in development (Phase 2 — EE reach PPO)
 
-**Latest change (2026-07-08):** Two-phase training verified — **99/100 demo success at 20/30/40 s**.
+**Latest change (2026-07-08):** 1 mm precision, direct-path shaping, 4-stage scripted training.
 
-| Result | Detail |
-|--------|--------|
-| Phase A (90 min curriculum) | **88.3%** rolling reach |
-| Phase B (30 min demo fine-tune) | **97.7%** rolling reach |
-| Demo verify @ 20 / 30 / 40 s | **99/100 (99%)** each — ≥ 95% gate **passed** |
-
-Prior infrastructure changes (same release): EMA smoothing + jerk penalty, 30 s shared train/demo horizon, plateau abort default off, `run_two_phase_training.sh` + `verify_demo_policy.sh`.
-
-**Reproduce:**
+| Change | Why |
+|--------|-----|
+| **1 mm EE tolerance** (`EE_REACH_TOLERANCE_M`) | Spec requires sub-millimeter final positioning on the real arm. |
+| **Direct-path reward** in approach zone | Penalizes lateral corrective motion when EE is near the target. |
+| **4-stage recipe** (`training_recipe.py`, `run_staged_training.sh`) | Reproducible coarse → demo → 5 mm → 1 mm pipeline from scratch. |
+| **Phase 5 rename** (`phase5_red_block/`) | Consecutive phase numbering after Phase 4. |
+| **Training monitor** (`monitor_training.sh --watch`) | Live reach-rate visibility during long host runs. |
 
 ```bash
-./scripts/host/run_isaac_lab_training.sh two-phase --headless
-./scripts/host/run_isaac_lab_training.sh verify-demo --headless
+./scripts/host/run_isaac_lab_training.sh staged --headless
+./scripts/host/run_isaac_lab_training.sh monitor --watch
 ```
 
-Operational status: [docs/project_status.md](docs/project_status.md).
+Status: [docs/project_status.md](docs/project_status.md).
 
 ## Repository Layout
 

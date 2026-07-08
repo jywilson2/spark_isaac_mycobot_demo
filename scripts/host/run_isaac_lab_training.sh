@@ -8,6 +8,8 @@
 #   ./scripts/host/run_isaac_lab_training.sh train [--headless] [--num-arms N] [--max-duration-minutes M]
 #   ./scripts/host/run_isaac_lab_training.sh play [--checkpoint PATH] [--episodes N]
 #   ./scripts/host/run_isaac_lab_training.sh demo [--checkpoint PATH]
+#   ./scripts/host/run_isaac_lab_training.sh staged [--headless]
+#   ./scripts/host/run_isaac_lab_training.sh monitor [--watch]
 #   ./scripts/host/run_isaac_lab_training.sh two-phase [--headless]
 #   ./scripts/host/run_isaac_lab_training.sh verify-demo [--headless]
 #
@@ -173,7 +175,7 @@ case "${MODE}" in
           HEADLESS=1
           shift
           ;;
-        --checkpoint|--seed|--robot-usd|--episode-length-s|--demo-max-episodes)
+        --checkpoint|--seed|--robot-usd|--episode-length-s|--demo-max-episodes|--reach-tolerance-m)
           PLAY_ARGS+=("$1" "$2")
           shift 2
           ;;
@@ -229,6 +231,12 @@ case "${MODE}" in
       ./isaaclab.sh -p "${REPO_ROOT}/isaac_lab/play_ppo.py" "${DEMO_ARGS[@]}"
     )
     ;;
+  staged)
+    exec "${REPO_ROOT}/scripts/run_staged_training.sh" "$@"
+    ;;
+  monitor)
+    exec "${REPO_ROOT}/scripts/monitor_training.sh" "$@"
+    ;;
   two-phase)
     exec "${REPO_ROOT}/scripts/run_two_phase_training.sh" "$@"
     ;;
@@ -236,7 +244,7 @@ case "${MODE}" in
     exec "${REPO_ROOT}/scripts/verify_demo_policy.sh" "$@"
     ;;
   *)
-    echo "Usage: $0 {check|install|verify|train|play|demo|two-phase|verify-demo} [args...]" >&2
+    echo "Usage: $0 {check|install|verify|train|play|demo|staged|monitor|two-phase|verify-demo} [args...]" >&2
     exit 1
     ;;
 esac
