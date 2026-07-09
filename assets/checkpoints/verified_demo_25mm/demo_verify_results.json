@@ -1,0 +1,39 @@
+{
+  "description": "Headless demo regression after two-phase training (2026-07-08). Policy: model_1730.pt equivalent (Phase B demo fine-tune, 98.4% rolling training reach @ 25 mm).",
+  "reach_tolerance_m": 0.025,
+  "episodes_per_horizon": 100,
+  "min_success_rate": 0.95,
+  "results": [
+    {
+      "episode_length_s": 20,
+      "reached": 99,
+      "attempted": 100,
+      "success_rate": 0.99,
+      "passed": true,
+      "log": "/tmp/spark_demo_verify_20s_20260708_034631.log"
+    },
+    {
+      "episode_length_s": 30,
+      "reached": 99,
+      "attempted": 100,
+      "success_rate": 0.99,
+      "passed": true,
+      "log": "/tmp/spark_demo_verify_30s_20260708_034832.log"
+    },
+    {
+      "episode_length_s": 40,
+      "reached": 99,
+      "attempted": 100,
+      "success_rate": 0.99,
+      "passed": true,
+      "log": "/tmp/spark_demo_verify_40s_20260708_035036.log"
+    }
+  ],
+  "two_phase_training": {
+    "phase_a_curriculum_reach": 0.883,
+    "phase_b_demo_reach": 0.977,
+    "phase_b_completed_iterations": 1706,
+    "commit": "d92a3cc"
+  },
+  "play_command": "./scripts/host/run_isaac_lab_training.sh play --headless --demo --demo-max-episodes 100 --num-arms 1 --checkpoint assets/checkpoints/verified_demo_25mm/policy.pt"
+}

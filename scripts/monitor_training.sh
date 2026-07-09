@@ -39,11 +39,11 @@ show_status() {
   echo "Updated: $(date)"
   echo
   if grep -q "Training sequence complete" "${LOG}"; then
-    grep -E "Stop reason:|Reach success rate:|Task requirement met:|Duration limit:" "${LOG}" | tail -4
+    grep -E "Stop reason:|Reach success rate:|Task requirement met:|Duration limit:" "${LOG}" | tail -4 || true
     echo
   fi
   echo "--- Latest iterations ---"
-  grep -E "reach_success_rate=|Learning iteration|curriculum=" "${LOG}" | tail -12
+  grep -E "reach_success_rate=|Learning iteration|curriculum=" "${LOG}" | tail -12 || true
   echo
   if [[ -f "${REPO_ROOT:-}/assets/checkpoints/isaac_lab_ppo/training_summary.json" ]]; then
     echo "--- training_summary.json ---"

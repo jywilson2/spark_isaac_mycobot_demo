@@ -38,6 +38,8 @@ def build_train_argv(stage_idx: int, *, headless: bool, extra: list[str]) -> lis
         argv.append('--no-early-success-stop')
     if stage.direct_path_shaping:
         argv.append('--direct-path-shaping')
+    if stage.enable_precision_tiers:
+        argv.append('--enable-precision-tiers')
     if stage.action_scale is not None:
         argv.extend(['--action-scale', str(stage.action_scale)])
     return argv

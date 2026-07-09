@@ -12,7 +12,7 @@ Automated pipeline for simulating the Elephant Robotics MyCobot 280 inside NVIDI
 |--------|-----|
 | **1 mm EE tolerance** (`EE_REACH_TOLERANCE_M`) | Spec requires sub-millimeter final positioning on the real arm. |
 | **Direct-path reward** in approach zone | Penalizes lateral corrective motion when EE is near the target. |
-| **4-stage recipe** (`training_recipe.py`, `run_staged_training.sh`) | Reproducible coarse → demo → 5 mm → 1 mm pipeline from scratch. |
+| **4-stage recipe** (`training_recipe.py`, `run_staged_training.sh`) | Reproducible coarse → demo → 10 mm → 3 mm → 1 mm pipeline from scratch. |
 | **Phase 5 rename** (`phase5_red_block/`) | Consecutive phase numbering after Phase 4. |
 | **Training monitor** (`monitor_training.sh --watch`) | Live reach-rate visibility during long host runs. |
 

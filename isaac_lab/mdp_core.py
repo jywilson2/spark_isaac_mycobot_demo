@@ -124,6 +124,8 @@ class ReachTaskConfig:
     approach_zone_m: float = DEFAULT_APPROACH_ZONE_M
     lateral_penalty: float = 2.0
     direct_path_shaping: bool = False
+    # Tiered bonuses when EE enters tighter bands (precision curriculum).
+    precision_tier_bonuses: tuple[tuple[float, float], ...] = ()
 
 
 @dataclass(frozen=True)
@@ -532,6 +534,10 @@ def compute_reach_task_reward(
     )
     if task.direct_path_shaping and distance <= task.approach_zone_m:
         reward -= task.lateral_penalty * abs(lateral_step_m)
+    for tier_m, bonus in sorted(task.precision_tier_bonuses, key=lambda pair: pair[0]):
+        if distance <= tier_m:
+            reward += bonus
+            break
     if distance <= task.reach_tolerance_m:
         reward += task.reach_bonus
     return reward, distance

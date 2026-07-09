@@ -11,4 +11,6 @@ assets/robots/
 # Host Isaac Sim iteration logs (see scripts/host/)
 assets/logs/
 
-assets/checkpoints/
+assets/checkpoints/*
+!assets/checkpoints/verified_demo_25mm/
+!assets/checkpoints/verified_demo_25mm/**

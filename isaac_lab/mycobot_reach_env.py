@@ -105,6 +105,7 @@ class MyCobotReachEnvCfg(DirectRLEnvCfg):
     target_sampling: str = 'curriculum'
     reach_tolerance_m: float = EE_REACH_TOLERANCE_M
     direct_path_shaping: bool = False
+    enable_precision_tiers: bool = False
 
     sim: SimulationCfg = SimulationCfg(dt=1.0 / 60.0, render_interval=decimation)
     scene: InteractiveSceneCfg = InteractiveSceneCfg(
@@ -165,10 +166,16 @@ class MyCobotReachEnv(DirectRLEnv):
         render_mode: str | None = None,
         **kwargs,
     ) -> None:
+        from isaac_lab.training_recipe import (  # noqa: WPS433
+            PRECISION_TIER_BONUSES,
+        )
+
+        tier_bonuses = PRECISION_TIER_BONUSES if cfg.enable_precision_tiers else ()
         self._task_cfg = ReachTaskConfig(
             action_scale=cfg.action_scale,
             reach_tolerance_m=cfg.reach_tolerance_m,
             direct_path_shaping=cfg.direct_path_shaping,
+            precision_tier_bonuses=tier_bonuses,
         )
         self._ee_body_idx = 0
         self._target_ee_pos = None
@@ -535,6 +542,7 @@ def make_env_cfg(
     action_scale: float | None = None,
     reach_tolerance_m: float | None = None,
     direct_path_shaping: bool | None = None,
+    enable_precision_tiers: bool | None = None,
 ) -> MyCobotReachEnvCfg:
     cfg = MyCobotReachEnvCfg()
     cfg.scene.num_envs = num_envs
@@ -547,6 +555,8 @@ def make_env_cfg(
         cfg.reach_tolerance_m = reach_tolerance_m
     if direct_path_shaping is not None:
         cfg.direct_path_shaping = direct_path_shaping
+    if enable_precision_tiers is not None:
+        cfg.enable_precision_tiers = enable_precision_tiers
     usd_path = robot_usd_path or str(DEFAULT_ROBOT_USD)
     cfg.robot_usd_path = usd_path
     cfg.robot.spawn.usd_path = usd_path

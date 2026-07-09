@@ -257,6 +257,12 @@ def parse_args() -> argparse.Namespace:
         help='Penalize lateral EE motion inside the approach zone (precision stage).',
     )
     parser.add_argument(
+        '--enable-precision-tiers',
+        action=argparse.BooleanOptionalAction,
+        default=False,
+        help='Add tiered reach bonuses at 10/5/3/1 mm during precision training.',
+    )
+    parser.add_argument(
         '--action-scale',
         type=float,
         default=None,
@@ -404,6 +410,7 @@ def main() -> int:
         action_scale=args.action_scale,
         reach_tolerance_m=args.reach_tolerance_m,
         direct_path_shaping=args.direct_path_shaping,
+        enable_precision_tiers=args.enable_precision_tiers,
     )
     env = EnvClass(cfg=env_cfg)
 

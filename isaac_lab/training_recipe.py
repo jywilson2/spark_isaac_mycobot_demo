@@ -1,22 +1,5 @@
 # Copyright 2026 spark_isaac_mycobot_demo contributors
-#
-# Licensed under the Apache License, Version 2.0 (the "License");
-# you may not use this file except in compliance with the License.
-# You may obtain a copy of the License at
-#
-#     http://www.apache.org/licenses/LICENSE-2.0
-#
-# Unless required by applicable law or agreed to in writing, software
-# distributed under the License is distributed on an "AS IS" BASIS,
-# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-# See the License for the specific language governing permissions and
-# limitations under the License.
-
-"""Reproducible multi-stage Phase 2 training recipe (spec.md).
-
-Single source of truth for ``scripts/run_staged_training.sh``. Each stage resumes
-from the prior checkpoint so a from-scratch run is fully scripted.
-"""
+"""Reproducible multi-stage Phase 2 training recipe (spec.md)."""
 
 from __future__ import annotations
 
@@ -25,11 +8,16 @@ from dataclasses import dataclass
 from isaac_lab.mdp_core import EE_REACH_TOLERANCE_COARSE_M, EE_REACH_TOLERANCE_M
 from isaac_lab.training_defaults import DEFAULT_EPISODE_LENGTH_S
 
+PRECISION_TIER_BONUSES: tuple[tuple[float, float], ...] = (
+    (0.010, 8.0),
+    (0.005, 18.0),
+    (0.003, 30.0),
+    (0.001, 50.0),
+)
+
 
 @dataclass(frozen=True)
 class TrainingStage:
-    """One row in the scripted from-scratch training pipeline."""
-
     name: str
     minutes: float
     target_reach_success_rate: float
@@ -39,16 +27,16 @@ class TrainingStage:
     resume: bool = True
     no_early_success_stop: bool = False
     direct_path_shaping: bool = False
+    enable_precision_tiers: bool = False
     action_scale: float | None = None
     episode_length_s: float = DEFAULT_EPISODE_LENGTH_S
 
 
-# Progressive: coarse IK → demo distribution → 5 mm direct approach → 1 mm final.
 STAGED_TRAINING_PHASES: tuple[TrainingStage, ...] = (
     TrainingStage(
         name='curriculum_coarse',
-        minutes=60.0,
-        target_reach_success_rate=0.90,
+        minutes=90.0,
+        target_reach_success_rate=0.95,
         target_sampling='curriculum',
         reach_tolerance_m=EE_REACH_TOLERANCE_COARSE_M,
         from_scratch=True,
@@ -57,19 +45,61 @@ STAGED_TRAINING_PHASES: tuple[TrainingStage, ...] = (
     TrainingStage(
         name='demo_coarse',
         minutes=30.0,
-        target_reach_success_rate=0.92,
+        target_reach_success_rate=0.95,
         target_sampling='demo',
         reach_tolerance_m=EE_REACH_TOLERANCE_COARSE_M,
         no_early_success_stop=True,
     ),
     TrainingStage(
-        name='precision_5mm',
+        name='precision_20mm',
         minutes=45.0,
-        target_reach_success_rate=0.88,
+        target_reach_success_rate=0.85,
         target_sampling='precision',
-        reach_tolerance_m=0.005,
+        reach_tolerance_m=0.020,
+        enable_precision_tiers=True,
+        action_scale=0.10,
+        no_early_success_stop=True,
+    ),
+    TrainingStage(
+        name='precision_15mm',
+        minutes=45.0,
+        target_reach_success_rate=0.85,
+        target_sampling='precision',
+        reach_tolerance_m=0.015,
+        enable_precision_tiers=True,
+        action_scale=0.09,
+        no_early_success_stop=True,
+    ),
+    TrainingStage(
+        name='precision_12mm',
+        minutes=45.0,
+        target_reach_success_rate=0.85,
+        target_sampling='precision',
+        reach_tolerance_m=0.012,
+        enable_precision_tiers=True,
+        action_scale=0.085,
+        no_early_success_stop=True,
+    ),
+    TrainingStage(
+        name='precision_6mm',
+        minutes=45.0,
+        target_reach_success_rate=0.85,
+        target_sampling='precision',
+        reach_tolerance_m=0.006,
+        enable_precision_tiers=True,
         direct_path_shaping=True,
-        action_scale=0.08,
+        action_scale=0.065,
+        no_early_success_stop=True,
+    ),
+    TrainingStage(
+        name='precision_3mm',
+        minutes=45.0,
+        target_reach_success_rate=0.85,
+        target_sampling='precision',
+        reach_tolerance_m=0.003,
+        enable_precision_tiers=True,
+        direct_path_shaping=True,
+        action_scale=0.055,
         no_early_success_stop=True,
     ),
     TrainingStage(
@@ -78,11 +108,11 @@ STAGED_TRAINING_PHASES: tuple[TrainingStage, ...] = (
         target_reach_success_rate=0.85,
         target_sampling='precision',
         reach_tolerance_m=EE_REACH_TOLERANCE_M,
+        enable_precision_tiers=True,
         direct_path_shaping=True,
         action_scale=0.05,
         no_early_success_stop=True,
     ),
 )
 
-# Demo verify uses the final 1 mm tolerance (spec.md).
 STAGED_VERIFY_REACH_TOLERANCE_M = EE_REACH_TOLERANCE_M
